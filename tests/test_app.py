@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from nostromo.app import create_app
-from nostromo.config import Settings
+from xwing.app import create_app
+from xwing.config import Settings
 
 
 HTML = {"Accept": "text/html"}
@@ -210,7 +210,7 @@ class TestSymlinkInsideRoot:
         target.write_text("hello")
         link = root / "link.txt"
         link.symlink_to(target)
-        from nostromo.files import safe_path
+        from xwing.files import safe_path
 
         result = safe_path(root, "link.txt")
         assert result.resolve() == target.resolve()

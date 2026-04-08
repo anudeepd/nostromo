@@ -33,23 +33,23 @@ def create_app_reload() -> FastAPI:
     """Factory for uvicorn reload mode — reads settings from environment variables."""
     from .config import Settings
 
-    root = os.environ.get("NOSTROMO_ROOT")
+    root = os.environ.get("XWING_ROOT")
     if not root:
         raise RuntimeError(
-            "NOSTROMO_ROOT environment variable is required for reload mode"
+            "XWING_ROOT environment variable is required for reload mode"
         )
 
     kwargs: dict = {"root_dir": Path(root)}
-    if os.environ.get("NOSTROMO_REQUIRE_AUTH") == "True":
+    if os.environ.get("XWING_REQUIRE_AUTH") == "True":
         kwargs["require_auth"] = True
-    kwargs["listen_host"] = os.environ.get("NOSTROMO_LISTEN_HOST", "127.0.0.1")
-    kwargs["listen_port"] = int(os.environ.get("NOSTROMO_LISTEN_PORT", "8989"))
-    if os.environ.get("NOSTROMO_MAX_UPLOAD_GB"):
+    kwargs["listen_host"] = os.environ.get("XWING_LISTEN_HOST", "127.0.0.1")
+    kwargs["listen_port"] = int(os.environ.get("XWING_LISTEN_PORT", "8989"))
+    if os.environ.get("XWING_MAX_UPLOAD_GB"):
         kwargs["max_upload_bytes"] = int(
-            float(os.environ["NOSTROMO_MAX_UPLOAD_GB"]) * 1024**3
+            float(os.environ["XWING_MAX_UPLOAD_GB"]) * 1024**3
         )
-    if os.environ.get("NOSTROMO_USER_HEADER"):
-        kwargs["user_header"] = os.environ["NOSTROMO_USER_HEADER"]
+    if os.environ.get("XWING_USER_HEADER"):
+        kwargs["user_header"] = os.environ["XWING_USER_HEADER"]
     settings = Settings(**kwargs)
     return create_app(settings)
 
@@ -65,15 +65,15 @@ def create_app(settings: Settings) -> FastAPI:
 
     app = FastAPI(lifespan=lifespan)
 
-    # LDAPGate middleware — enabled via NOSTROMO_LDAP_CONFIG env var or --ldap-config CLI flag
-    _ldap_config_path = os.getenv("NOSTROMO_LDAP_CONFIG")
+    # LDAPGate middleware — enabled via XWING_LDAP_CONFIG env var or --ldap-config CLI flag
+    _ldap_config_path = os.getenv("XWING_LDAP_CONFIG")
     if _ldap_config_path:
         try:
             from ldapgate.config import load_config  # type: ignore[import]
             from ldapgate.middleware import add_ldap_auth  # type: ignore[import]
         except ImportError as e:
             raise RuntimeError(
-                "ldapgate is not installed but NOSTROMO_LDAP_CONFIG is set. "
+                "ldapgate is not installed but XWING_LDAP_CONFIG is set. "
                 "Install it with: pip install ldapgate"
             ) from e
         _login_template = TEMPLATES_DIR / "login.html"

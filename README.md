@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/anudeepd/nostromo/main/assets/logo.svg" alt="Nostromo" width="120"/>
+  <img src="https://raw.githubusercontent.com/anudeepd/xwing/main/assets/logo.svg" alt="Xwing" width="120"/>
 </p>
 
-<h1 align="center">Nostromo</h1>
+<h1 align="center">Xwing</h1>
 
 <p align="center">A self-contained file sharing server with WebDAV support. Works out of the box or integrates with LDAPGate for corporate LDAP/AD authentication.</p>
 
@@ -19,19 +19,19 @@
 ## Install
 
 ```bash
-pip install nostromo
+pip install xwing
 ```
 
 For LDAP/AD authentication:
 
 ```bash
-pip install 'nostromo[ldap]'
+pip install 'xwing[ldap]'
 ```
 
 ## Usage
 
 ```bash
-nostromo serve --root /path/to/serve
+xwing serve --root /path/to/serve
 ```
 
 Opens the file browser at `http://127.0.0.1:8989` and launches your default browser.
@@ -54,7 +54,7 @@ Options:
 
 **Linux (DAVfs2):**
 ```bash
-sudo mount.davfs http://localhost:8989 /mnt/nostromo -o username=<user>
+sudo mount.davfs http://localhost:8989 /mnt/xwing -o username=<user>
 ```
 
 **macOS:**
@@ -88,24 +88,24 @@ curl -X POST http://localhost:8989/_upload/<session_id>/complete
 
 ## LDAP / Active Directory Authentication
 
-Nostromo supports two modes for LDAP/AD auth:
+Xwing supports two modes for LDAP/AD auth:
 
-**Mode 1 — Standalone proxy:** Run LDAPGate as a reverse proxy in front of nostromo. Authenticated requests get an `X-Forwarded-User` header that nostromo reads.
+**Mode 1 — Standalone proxy:** Run LDAPGate as a reverse proxy in front of xwing. Authenticated requests get an `X-Forwarded-User` header that xwing reads.
 
 ```
-Browser → LDAPGate → nostromo
+Browser → LDAPGate → xwing
 ```
 
 ```bash
 ldapgate serve --config ldapgate.yaml
-nostromo serve --root /data --require-auth
+xwing serve --root /data --require-auth
 ```
 
-**Mode 2 — Built-in middleware:** Inject LDAPGate directly into nostromo as FastAPI middleware:
+**Mode 2 — Built-in middleware:** Inject LDAPGate directly into xwing as FastAPI middleware:
 
 ```bash
-pip install 'nostromo[ldap]'
-nostromo serve --root /data --ldap-config /path/to/ldapgate.yaml
+pip install 'xwing[ldap]'
+xwing serve --root /data --ldap-config /path/to/ldapgate.yaml
 ```
 
 See the [LDAPGate README](https://github.com/anudeepd/ldapgate) for config file documentation.
@@ -115,10 +115,10 @@ See the [LDAPGate README](https://github.com/anudeepd/ldapgate) for config file 
 Requires [uv](https://github.com/astral-sh/uv).
 
 ```bash
-git clone https://github.com/anudeepd/nostromo
-cd nostromo
+git clone https://github.com/anudeepd/xwing
+cd xwing
 uv sync
-uv run nostromo serve --root .
+uv run xwing serve --root .
 ```
 
 ## License

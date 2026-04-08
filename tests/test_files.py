@@ -1,6 +1,6 @@
 import pytest
 
-from nostromo.files import human_size, is_editable, safe_path
+from xwing.files import human_size, is_editable, safe_path
 
 
 class TestSafePath:

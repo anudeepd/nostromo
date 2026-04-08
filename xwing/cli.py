@@ -10,7 +10,7 @@ from .config import Settings
 
 
 @click.group()
-@click.version_option(package_name="nostromo")
+@click.version_option(package_name="xwing")
 def main():
     """Nostromo — simple file sharing server with WebDAV support."""
 
@@ -79,7 +79,7 @@ def serve(
     url = f"http://{host}:{port}"
 
     if ldap_config:
-        os.environ["NOSTROMO_LDAP_CONFIG"] = ldap_config
+        os.environ["XWING_LDAP_CONFIG"] = ldap_config
         click.echo(f"LDAP authentication enabled ({ldap_config})")
 
     click.echo(f"Starting Nostromo at {url}")
@@ -107,17 +107,17 @@ def serve(
         kwargs["user_header"] = user_header
 
     if reload:
-        os.environ["NOSTROMO_ROOT"] = root
-        os.environ["NOSTROMO_REQUIRE_AUTH"] = str(require_auth)
-        os.environ["NOSTROMO_LISTEN_HOST"] = host
-        os.environ["NOSTROMO_LISTEN_PORT"] = str(port)
+        os.environ["XWING_ROOT"] = root
+        os.environ["XWING_REQUIRE_AUTH"] = str(require_auth)
+        os.environ["XWING_LISTEN_HOST"] = host
+        os.environ["XWING_LISTEN_PORT"] = str(port)
         if max_upload_gb is not None:
-            os.environ["NOSTROMO_MAX_UPLOAD_GB"] = str(max_upload_gb)
+            os.environ["XWING_MAX_UPLOAD_GB"] = str(max_upload_gb)
         if user_header:
-            os.environ["NOSTROMO_USER_HEADER"] = user_header
+            os.environ["XWING_USER_HEADER"] = user_header
 
         uvicorn.run(
-            "nostromo.app:create_app_reload",
+            "xwing.app:create_app_reload",
             host=host,
             port=port,
             factory=True,

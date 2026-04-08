@@ -1,9 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from nostromo import upload as upload_module
-from nostromo.app import create_app
-from nostromo.config import Settings
+from xwing import upload as upload_module
+from xwing.app import create_app
+from xwing.config import Settings
 
 
 @pytest.fixture

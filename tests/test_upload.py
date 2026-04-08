@@ -2,10 +2,10 @@ import time
 
 import pytest
 
-from nostromo import upload as upload_module
-from nostromo.app import create_app
-from nostromo.config import Settings
-from nostromo.upload import _cleanup_once
+from xwing import upload as upload_module
+from xwing.app import create_app
+from xwing.config import Settings
+from xwing.upload import _cleanup_once
 from fastapi.testclient import TestClient
 
 

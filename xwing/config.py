@@ -23,6 +23,6 @@ class Settings(BaseModel):
             ]
             self.tmp_dir = (
                 Path(tempfile.gettempdir())
-                / f"nostromo-{self.root_dir.name}-{root_hash}"
+                / f"xwing-{self.root_dir.name}-{root_hash}"
             )
         return self

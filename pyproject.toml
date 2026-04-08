@@ -3,8 +3,8 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nostromo"
-version = "0.1.4"
+name = "xwing"
+version = "0.1.0"
 description = "File sharing server with WebDAV support"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,19 +39,19 @@ dev = [
 ldap = ["ldapgate"]
 
 [project.urls]
-Homepage = "https://github.com/anudeepd/nostromo"
-Repository = "https://github.com/anudeepd/nostromo"
-Issues = "https://github.com/anudeepd/nostromo/issues"
+Homepage = "https://github.com/anudeepd/xwing"
+Repository = "https://github.com/anudeepd/xwing"
+Issues = "https://github.com/anudeepd/xwing/issues"
 
 [project.scripts]
-nostromo = "nostromo.cli:main"
+xwing = "xwing.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["nostromo*"]
+include = ["xwing*"]
 
 [tool.setuptools.package-data]
-nostromo = ["static/**/*", "static/*", "templates/*"]
+xwing = ["static/**/*", "static/*", "templates/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
