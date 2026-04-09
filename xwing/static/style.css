@@ -269,3 +269,20 @@ tr:hover .btn-delete, tr:hover .btn-zip { opacity: 1; }
 .upload-item.done .progress-bar { background: #22c55e; }
 .upload-item.error .progress-bar { background: var(--danger); }
 .upload-status { font-size: 0.72rem; color: var(--text-muted); margin-top: 4px; }
+
+/* ── Background watermark ───────────────────────────────────────────────────── */
+.bg-watermark {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 0;
+}
+.bg-watermark svg {
+  width: 520px;
+  height: 520px;
+  opacity: 0.045;
+}
+.shell { position: relative; z-index: 1; }

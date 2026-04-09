@@ -9,4 +9,9 @@ def get_user(request: Request, settings: Settings) -> str:
         if settings.require_auth:
             raise HTTPException(status_code=403, detail="Authentication required")
         return "anonymous"
-    return user
+    return user.lower()
+
+
+def require_perm(user: str, perm: str, settings: Settings) -> None:
+    if not getattr(settings.perms_for(user), perm):
+        raise HTTPException(status_code=403, detail=f"{perm.capitalize()} permission denied")

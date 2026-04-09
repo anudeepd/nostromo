@@ -9,7 +9,7 @@ import anyio
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
-from .auth import get_user
+from .auth import get_user, require_perm
 from .config import Settings
 from .files import safe_path
 
@@ -54,14 +54,10 @@ async def _delete_session(tmp_dir: Path, session_id: str) -> None:  # type: igno
 def create_upload_router(settings: Settings) -> APIRouter:
     router = APIRouter(prefix="/_upload")
 
-    def _check_write_permission(user: str) -> None:
-        if not settings.permission.can_write(user):
-            raise HTTPException(status_code=403, detail="Write permission denied")
-
     @router.post("/init")
     async def upload_init(request: Request):
         user = get_user(request, settings)
-        _check_write_permission(user)
+        require_perm(user, "write", settings)
 
         body = await request.json()
 
@@ -113,7 +109,7 @@ def create_upload_router(settings: Settings) -> APIRouter:
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
         session_user = session.get("user")
-        if session_user and session_user.lower() != user.lower():
+        if session_user and session_user != user:
             raise HTTPException(status_code=403, detail="Not session owner")
 
         if chunk_index < 0 or chunk_index >= session["total_chunks"]:
@@ -150,12 +146,12 @@ def create_upload_router(settings: Settings) -> APIRouter:
     @router.post("/{session_id}/complete")
     async def upload_complete(session_id: str, request: Request):
         user = get_user(request, settings)
-        _check_write_permission(user)
+        require_perm(user, "write", settings)
         session = await _load_session(settings.tmp_dir, session_id)  # type: ignore[union-attr]
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
         session_user = session.get("user")
-        if session_user and session_user.lower() != user.lower():
+        if session_user and session_user != user:
             raise HTTPException(status_code=403, detail="Not session owner")
 
         total = session["total_chunks"]

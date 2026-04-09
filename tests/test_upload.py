@@ -144,9 +144,9 @@ class TestUploadLifecycle:
         r = client.put("/_upload/deadbeef/0", content=b"data")
         assert r.status_code == 404
 
-    def test_chunk_exceeds_max_upload_bytes(self, root, tmp_dir):
+    def test_chunk_exceeds_max_upload_bytes(self, root, tmp_dir, users_yaml):
         s = Settings(
-            root_dir=root, tmp_dir=tmp_dir, max_upload_bytes=10, write_users={"*"}
+            root_dir=root, tmp_dir=tmp_dir, max_upload_bytes=10, users_config=users_yaml
         )
         with TestClient(create_app(s)) as c:
             r = c.post(
@@ -168,9 +168,9 @@ class TestUploadAuth:
             )
         assert r.status_code == 403
 
-    def test_init_allowed_with_user_header(self, root, tmp_dir):
+    def test_init_allowed_with_user_header(self, root, tmp_dir, users_yaml):
         s = Settings(
-            root_dir=root, tmp_dir=tmp_dir, require_auth=True, write_users={"*"}
+            root_dir=root, tmp_dir=tmp_dir, require_auth=True, users_config=users_yaml
         )
         with TestClient(create_app(s)) as c:
             r = c.post(
@@ -194,9 +194,11 @@ class TestUploadAuth:
 
 
 class TestUploadSessionIsolation:
-    def test_alice_cannot_write_to_bobs_session(self, root, tmp_dir):
+    def test_alice_cannot_write_to_bobs_session(self, root, tmp_dir, tmp_path):
+        users_yaml = tmp_path / "users.yaml"
+        users_yaml.write_text("users:\n  alice:\n    read: true\n    write: true\n    delete: true\n")
         s = Settings(
-            root_dir=root, tmp_dir=tmp_dir, require_auth=True, write_users={"alice"}
+            root_dir=root, tmp_dir=tmp_dir, require_auth=True, users_config=users_yaml
         )
         with TestClient(create_app(s)) as c:
             r = c.post(
@@ -212,9 +214,11 @@ class TestUploadSessionIsolation:
             )
             assert r.status_code == 403
 
-    def test_alice_cannot_complete_bobs_session(self, root, tmp_dir):
+    def test_alice_cannot_complete_bobs_session(self, root, tmp_dir, tmp_path):
+        users_yaml = tmp_path / "users.yaml"
+        users_yaml.write_text("users:\n  alice:\n    read: true\n    write: true\n    delete: true\n")
         s = Settings(
-            root_dir=root, tmp_dir=tmp_dir, require_auth=True, write_users={"alice"}
+            root_dir=root, tmp_dir=tmp_dir, require_auth=True, users_config=users_yaml
         )
         with TestClient(create_app(s)) as c:
             r = c.post(
@@ -281,28 +285,3 @@ class TestCleanupStale:
         assert session_dir.exists()
 
 
-# Alias for backward compatibility
-_cleanup_once = _cleanup_stale_async
-
-
-async def _cleanup_stale_async(settings: Settings) -> None:
-    """Remove stale upload sessions by scanning filesystem."""
-    now = time.monotonic()
-    if not settings.tmp_dir or not settings.tmp_dir.exists():
-        return
-
-    for session_dir in settings.tmp_dir.iterdir():
-        if not session_dir.is_dir():
-            continue
-        session_file = session_dir / "session.json"
-        if not session_file.exists():
-            continue
-        try:
-            content = session_file.read_text()
-            session = json.loads(content)
-            if now - session.get("created_at", 0) > DEFAULT_SESSION_TTL_SECONDS:
-                import shutil
-
-                shutil.rmtree(session_dir, ignore_errors=True)
-        except (json.JSONDecodeError, OSError):
-            continue

@@ -1,5 +1,6 @@
 import asyncio
 import io
+import logging
 import os
 import shutil
 import zipfile
@@ -7,13 +8,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
+logger = logging.getLogger(__name__)
+
 import anyio
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .auth import get_user
+from .auth import get_user, require_perm
 from .config import Settings
 from .files import human_size, is_editable, list_dir, safe_path
 from .upload import cleanup_stale_sessions, create_upload_router
@@ -57,18 +60,8 @@ def create_app_reload() -> FastAPI:
         )
     if os.environ.get("XWING_USER_HEADER"):
         kwargs["user_header"] = os.environ["XWING_USER_HEADER"]
-    if os.environ.get("XWING_READ_USERS"):
-        kwargs["read_users"] = set(
-            u.strip() for u in os.environ["XWING_READ_USERS"].split(",") if u.strip()
-        )
-    if os.environ.get("XWING_WRITE_USERS"):
-        kwargs["write_users"] = set(
-            u.strip() for u in os.environ["XWING_WRITE_USERS"].split(",") if u.strip()
-        )
-    if os.environ.get("XWING_ADMIN_USERS"):
-        kwargs["admin_users"] = set(
-            u.strip() for u in os.environ["XWING_ADMIN_USERS"].split(",") if u.strip()
-        )
+    if os.environ.get("XWING_USERS_CONFIG"):
+        kwargs["users_config"] = Path(os.environ["XWING_USERS_CONFIG"])
     settings = Settings(**kwargs)
     return create_app(settings)
 
@@ -83,6 +76,14 @@ def create_app(settings: Settings) -> FastAPI:
         task.cancel()
 
     app = FastAPI(lifespan=lifespan)
+
+    if settings.users_config:
+        logger.info("Permissions loaded from %s", settings.users_config)
+    else:
+        logger.error(
+            "No --users-config provided — all users are read-only. "
+            "Pass --users-config <file> to grant write or delete access."
+        )
 
     # LDAPGate middleware — enabled via XWING_LDAP_CONFIG env var or --ldap-config CLI flag
     _ldap_config_path = os.getenv("XWING_LDAP_CONFIG")
@@ -141,22 +142,10 @@ def create_app(settings: Settings) -> FastAPI:
             return "/"
         return "/" + rel.as_posix()
 
-    def _check_read_permission(user: str) -> None:
-        if not settings.permission.can_read(user):
-            raise HTTPException(status_code=403, detail="Read permission denied")
-
-    def _check_write_permission(user: str) -> None:
-        if not settings.permission.can_write(user):
-            raise HTTPException(status_code=403, detail="Write permission denied")
-
-    def _check_admin_permission(user: str) -> None:
-        if not settings.permission.can_admin(user):
-            raise HTTPException(status_code=403, detail="Admin permission denied")
-
     # ── Method handlers ───────────────────────────────────────────────────────
 
     async def _handle_put(fspath: Path, request: Request, user: str) -> Response:
-        _check_write_permission(user)
+        require_perm(user, "write", settings)
 
         if fspath.is_dir():
             raise HTTPException(status_code=409, detail="Is a directory")
@@ -199,7 +188,7 @@ def create_app(settings: Settings) -> FastAPI:
         return Response(status_code=204)
 
     async def _handle_delete(fspath: Path, user: str) -> Response:
-        _check_admin_permission(user)
+        require_perm(user, "delete", settings)
 
         if not fspath.exists():
             raise HTTPException(status_code=404)
@@ -319,9 +308,11 @@ def create_app(settings: Settings) -> FastAPI:
         user = get_user(request, settings)
         fspath = resolve(request)
 
-        # Check read permission for all operations (except OPTIONS)
+        # OPTIONS is exempt from auth: WebDAV clients (e.g. Windows, Finder) send
+        # OPTIONS before credentials to discover supported methods (RFC 4918 §9.1).
+        # Blocking it would prevent clients from negotiating the connection at all.
         if method != "OPTIONS":
-            _check_read_permission(user)
+            require_perm(user, "read", settings)
 
         if method == "OPTIONS":
             return Response(
@@ -339,17 +330,17 @@ def create_app(settings: Settings) -> FastAPI:
             return propfind_response(request, fspath, settings.root_dir)
 
         if method == "MKCOL":
-            _check_write_permission(user)
+            require_perm(user, "write", settings)
             return mkcol_response(fspath)
 
         if method == "COPY":
-            _check_write_permission(user)
+            require_perm(user, "write", settings)
             dest = dest_from_header(request, settings.root_dir)
             overwrite = request.headers.get("overwrite", "T").upper() != "F"
             return await copy_response(fspath, dest, overwrite)
 
         if method == "MOVE":
-            _check_admin_permission(user)
+            require_perm(user, "delete", settings)
             dest = dest_from_header(request, settings.root_dir)
             overwrite = request.headers.get("overwrite", "T").upper() != "F"
             return await move_response(fspath, dest, overwrite)

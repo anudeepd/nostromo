@@ -59,23 +59,20 @@ def main():
     "--require-auth",
     is_flag=True,
     default=False,
-    help="Require authentication header (403 if missing and require_auth enabled).",
+    help="Require authentication header (403 if missing).",
 )
 @click.option(
-    "--read-users",
+    "--users-config",
+    "users_config",
     default=None,
-    help="Comma-separated users who can read/browse (* for public, empty = default).",
+    type=click.Path(exists=True, dir_okay=False, resolve_path=True),
+    help="Path to YAML file with per-user read/write/delete permissions. "
+         "Unlisted users and '*' fallback default to read-only.",
 )
-@click.option(
-    "--write-users",
-    default=None,
-    help="Comma-separated users who can upload (empty = read-only).",
-)
-@click.option(
-    "--admin-users",
-    default=None,
-    help="Comma-separated users who can delete/move.",
-)
+# Deprecated in 0.2.2 — replaced by --users-config
+@click.option("--read-users", default=None, hidden=True)
+@click.option("--write-users", default=None, hidden=True)
+@click.option("--admin-users", default=None, hidden=True)
 @click.option(
     "--user-header",
     default=None,
@@ -101,6 +98,7 @@ def serve(
     max_chunks,
     session_ttl_minutes,
     require_auth,
+    users_config,
     read_users,
     write_users,
     admin_users,
@@ -109,6 +107,16 @@ def serve(
     ldap_config,
 ):
     """Start the X-wing web server."""
+    for flag, val in (
+        ("--read-users", read_users),
+        ("--write-users", write_users),
+        ("--admin-users", admin_users),
+    ):
+        if val is not None:
+            raise click.UsageError(
+                f"{flag} was removed in 0.2.2. "
+                "Use --users-config with a YAML file instead."
+            )
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
@@ -122,6 +130,11 @@ def serve(
         click.echo(f"LDAP authentication enabled ({ldap_config})")
 
     click.echo(f"Starting X-wing at {url}")
+    if not users_config:
+        click.echo(
+            "WARNING: No --users-config provided — all users are read-only.",
+            err=True,
+        )
 
     if open_browser:
         import threading
@@ -150,18 +163,8 @@ def serve(
         kwargs["session_ttl_seconds"] = session_ttl_minutes * 60
     if user_header:
         kwargs["user_header"] = user_header
-    if read_users is not None:
-        kwargs["read_users"] = set(
-            u.strip() for u in read_users.split(",") if u.strip()
-        )
-    if write_users is not None:
-        kwargs["write_users"] = set(
-            u.strip() for u in write_users.split(",") if u.strip()
-        )
-    if admin_users is not None:
-        kwargs["admin_users"] = set(
-            u.strip() for u in admin_users.split(",") if u.strip()
-        )
+    if users_config is not None:
+        kwargs["users_config"] = users_config
 
     if reload:
         os.environ["XWING_ROOT"] = root
@@ -176,12 +179,8 @@ def serve(
             os.environ["XWING_MAX_CHUNKS"] = str(max_chunks)
         if session_ttl_minutes is not None:
             os.environ["XWING_SESSION_TTL_MINUTES"] = str(session_ttl_minutes)
-        if read_users is not None:
-            os.environ["XWING_READ_USERS"] = read_users
-        if write_users is not None:
-            os.environ["XWING_WRITE_USERS"] = write_users
-        if admin_users is not None:
-            os.environ["XWING_ADMIN_USERS"] = admin_users
+        if users_config is not None:
+            os.environ["XWING_USERS_CONFIG"] = users_config
         if user_header:
             os.environ["XWING_USER_HEADER"] = user_header
 
