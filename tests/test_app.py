@@ -316,6 +316,8 @@ class TestAuth:
         assert ".submit-label { min-width: 4.75rem; }" in template
         assert "appearance: none;" in template
         assert "-webkit-appearance: none;" in template
+        assert "@supports (-moz-appearance: none)" in template
+        assert "padding-right: 0.75rem;" in template
         assert 'id="password-toggle"' not in template
         assert 'style="' not in template
 

@@ -1,6 +1,6 @@
 {
   "name": "xwing-frontend",
-  "version": "0.3.22",
+  "version": "0.3.28",
   "type": "commonjs",
   "private": true,
   "scripts": {
