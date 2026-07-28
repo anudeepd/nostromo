@@ -169,17 +169,31 @@ test("mouse and keyboard transitions keep layer and trigger ownership", async ({
   await expect(page.getByText("1 selected", { exact: true })).not.toBeVisible();
 });
 
-test("dragging files exposes a clear full-workspace drop target", async ({ page }) => {
+test("dragging files exposes feedback and a delayed-drop fallback", async ({ page }) => {
+  await page.clock.install();
   await page.goto("/");
 
-  await page.locator(".xw-app").dispatchEvent("dragenter");
+  const app = page.locator(".xw-app");
+  await app.dispatchEvent("dragenter");
+  await app.dispatchEvent("dragover");
   const target = page.getByRole("status");
   await expect(target).toContainText("Drop files here");
   await expect(target).toContainText("Upload to /");
-  await expect(target).toHaveCSS("display", "flex");
 
-  await page.locator(".xw-app").dispatchEvent("dragleave");
-  await expect(target).not.toBeVisible();
+  await page.clock.fastForward(1000);
+  await app.dispatchEvent("dragover");
+  await page.clock.fastForward(1000);
+  await expect(target).toContainText("Drop files here");
+
+  await page.clock.fastForward(500);
+  await expect(page.getByRole("status")).toHaveText("Preparing upload…");
+
+  await page.clock.fastForward(15000);
+  await expect(page.getByRole("status")).toHaveText("Upload hasn't started yet.");
+  await expect(page.getByRole("button", { name: "Choose files" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Dismiss upload status" }).click();
+  await expect(page.getByText("Upload hasn't started yet.")).not.toBeVisible();
 });
 
 test("a completed browser upload refreshes the folder automatically", async ({ page }) => {

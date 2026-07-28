@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { useModalFocus } from "./keyboard";
 import { nearestSurvivor, selectionRange } from "./selection";
@@ -21,10 +21,14 @@ type Dialog =
   | { kind: "delete"; paths: string[]; pending: boolean; error?: string | undefined }
   | null;
 
+type DropWaitState = "preparing" | "delayed" | null;
+
 const uploadManager = new UploadManager();
 const PARALLEL_VALUES: Parallelism[] = [1, 2, 4, 8];
 const AUTH_REDIRECT_DELAY_MS = 1500;
 const SORT_STORAGE_VERSION = "v2";
+const DRAG_OVERLAY_STALE_MS = 1500;
+const DROP_DELAYED_MS = 15000;
 
 function sortStorageKey(user: string): string {
   return `xwing.sort.${SORT_STORAGE_VERSION}.${user}`;
@@ -84,6 +88,7 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [dropWaitState, setDropWaitState] = useState<DropWaitState>(null);
   const [arrivingNames, setArrivingNames] = useState<Set<string>>(() => new Set());
   const [pageLeaving, setPageLeaving] = useState(false);
   const [authOverlay, setAuthOverlay] = useState<"signout" | "expired" | null>(null);
@@ -93,6 +98,8 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
   const requestId = useRef(0);
   const abort = useRef<AbortController | null>(null);
   const dragDepth = useRef(0);
+  const dragOverlayTimer = useRef<number | null>(null);
+  const dropDelayTimer = useRef<number | null>(null);
   const completedUploads = useRef(new Set<string>());
   const pendingArrivalNames = useRef(new Set<string>());
   const autoRefreshTimer = useRef<number | null>(null);
@@ -317,16 +324,67 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
     downloadBlob(await response.blob(), contentDispositionFilename(response.headers.get("content-disposition")) || "xwing-selection.zip");
   };
 
+  const clearDropFeedback = useCallback((): void => {
+    if (dragOverlayTimer.current !== null) {
+      window.clearTimeout(dragOverlayTimer.current);
+      dragOverlayTimer.current = null;
+    }
+    if (dropDelayTimer.current !== null) {
+      window.clearTimeout(dropDelayTimer.current);
+      dropDelayTimer.current = null;
+    }
+    dragDepth.current = 0;
+    setDragging(false);
+    setDropWaitState(null);
+  }, []);
+
+  const refreshDropFeedback = useCallback((): void => {
+    setDragging(true);
+    setDropWaitState(null);
+    if (dragOverlayTimer.current !== null) window.clearTimeout(dragOverlayTimer.current);
+    if (dropDelayTimer.current !== null) {
+      window.clearTimeout(dropDelayTimer.current);
+      dropDelayTimer.current = null;
+    }
+    dragOverlayTimer.current = window.setTimeout(() => {
+      dragOverlayTimer.current = null;
+      setDragging(false);
+      setDropWaitState("preparing");
+      dropDelayTimer.current = window.setTimeout(() => {
+        dropDelayTimer.current = null;
+        setDropWaitState("delayed");
+      }, DROP_DELAYED_MS);
+    }, DRAG_OVERLAY_STALE_MS);
+  }, []);
+
+  useEffect(() => {
+    const clearWhenHidden = (): void => {
+      if (document.hidden) clearDropFeedback();
+    };
+    window.addEventListener("drop", clearDropFeedback);
+    window.addEventListener("dragend", clearDropFeedback);
+    window.addEventListener("blur", clearDropFeedback);
+    document.addEventListener("visibilitychange", clearWhenHidden);
+    return () => {
+      window.removeEventListener("drop", clearDropFeedback);
+      window.removeEventListener("dragend", clearDropFeedback);
+      window.removeEventListener("blur", clearDropFeedback);
+      document.removeEventListener("visibilitychange", clearWhenHidden);
+      if (dragOverlayTimer.current !== null) window.clearTimeout(dragOverlayTimer.current);
+      if (dropDelayTimer.current !== null) window.clearTimeout(dropDelayTimer.current);
+    };
+  }, [clearDropFeedback]);
+
   const queueFiles = (list: FileList | File[]): void => {
     if (!directory.permissions.write || !list.length) return;
     uploadManager.add(Array.from(list), directory.path, directory.upload.chunkSize);
   };
 
   return <div className={`xw-app ${pageLeaving ? "page-leaving" : ""}`}
-    onDragEnter={event => { event.preventDefault(); if (!directory.permissions.write) return; dragDepth.current += 1; setDragging(true); }}
-    onDragOver={event => { if (directory.permissions.write) event.preventDefault(); }}
-    onDragLeave={event => { event.preventDefault(); dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDragging(false); }}
-    onDrop={event => { event.preventDefault(); dragDepth.current = 0; setDragging(false); queueFiles(event.dataTransfer.files); }}>
+    onDragEnter={event => { event.preventDefault(); if (!directory.permissions.write) return; dragDepth.current += 1; refreshDropFeedback(); }}
+    onDragOver={event => { if (!directory.permissions.write) return; event.preventDefault(); refreshDropFeedback(); }}
+    onDragLeave={event => { event.preventDefault(); dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) clearDropFeedback(); }}
+    onDrop={event => { event.preventDefault(); clearDropFeedback(); queueFiles(event.dataTransfer.files); }}>
     <a className="skip-link" href="#file-list">Skip to files</a>
     <header className="topbar">
       <div className="brand"><Logo/><span>X-wing</span><small className="brand-context">FILES</small></div>
@@ -348,8 +406,8 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
           <button className="button primary" disabled={!directory.permissions.write} onClick={() => fileInput.current?.click()}><Icon name="upload"/><span className="label">Upload files</span></button>
           <button className="button hide-tablet" aria-label="Upload folder" disabled={!directory.permissions.write} onClick={() => folderInput.current?.click()}><Icon name="folderUpload"/><span className="label">Upload folder</span></button>
           <button className="button" aria-label="New folder" disabled={!directory.permissions.write} onClick={() => setDialog({ kind: "mkdir", value: "" })}><Icon name="folderAdd"/><span className="label">New folder</span></button>
-          <input ref={fileInput} type="file" multiple hidden onChange={event => event.target.files && queueFiles(event.target.files)}/>
-          <input ref={folderInput} type="file" multiple hidden {...({ webkitdirectory: "" } as React.InputHTMLAttributes<HTMLInputElement>)} onChange={event => event.target.files && queueFiles(event.target.files)}/>
+          <input ref={fileInput} type="file" multiple hidden onChange={event => { if (event.target.files) { clearDropFeedback(); queueFiles(event.target.files); } event.currentTarget.value = ""; }}/>
+          <input ref={folderInput} type="file" multiple hidden {...({ webkitdirectory: "" } as React.InputHTMLAttributes<HTMLInputElement>)} onChange={event => { if (event.target.files) { clearDropFeedback(); queueFiles(event.target.files); } event.currentTarget.value = ""; }}/>
         </div>
         <div className={`toolbar-group selection-actions ${selected.size ? "visible" : ""}`} aria-hidden={!selected.size}>
           <span className="selection-pill"><i/>{selected.size} selected</span>
@@ -386,6 +444,14 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
         </div>
         <div className="statusbar"><span className="drop-hint">Drop files anywhere to upload</span></div>
         {directoryState === "loading" && <div className="loading-line"/>}
+        {dropWaitState && <div className={`drop-wait ${dropWaitState}`}>
+          {dropWaitState === "preparing"
+            ? <span className="drop-wait-spinner" aria-hidden="true"/>
+            : <span className="drop-wait-icon" aria-hidden="true"><Icon name="upload"/></span>}
+          <span role="status" aria-live="polite">{dropWaitState === "preparing" ? "Preparing upload…" : "Upload hasn't started yet."}</span>
+          {dropWaitState === "delayed" && <button className="button" type="button" onClick={() => fileInput.current?.click()}>Choose files</button>}
+          <button className="icon-button" type="button" aria-label="Dismiss upload status" onClick={clearDropFeedback}><Icon name="close"/></button>
+        </div>}
       </section>
       {dragging && <div className="drop-target" role="status" aria-live="polite"><span className="drop-target-icon"><Icon name="upload"/></span><strong>Drop files here</strong><span>Upload to {directory.path}</span></div>}
       <UploadDock snapshot={upload}/>
