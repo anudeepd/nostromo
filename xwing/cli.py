@@ -31,10 +31,18 @@ def _configure_logging(log_file: Path | None) -> None:
 
 
 @main.command()
-@click.option("--audit-db", default=None, type=click.Path(dir_okay=False, path_type=Path),
-              help="SQLite audit database path (also enables auditing).")
-@click.option("--log-file", default=None, type=click.Path(dir_okay=False, path_type=Path),
-              help="Append application logs to this file.")
+@click.option(
+    "--audit-db",
+    default=None,
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="SQLite audit database path (also enables auditing).",
+)
+@click.option(
+    "--log-file",
+    default=None,
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Append application logs to this file.",
+)
 @click.option(
     "--root",
     required=True,
@@ -86,7 +94,7 @@ def _configure_logging(log_file: Path | None) -> None:
     default=None,
     type=click.Path(exists=True, dir_okay=False, resolve_path=True),
     help="Path to YAML file with per-user read/write/delete permissions. "
-         "Unlisted users are denied unless '*' is configured.",
+    "Unlisted users are denied unless '*' is configured.",
 )
 # Deprecated in 0.2.2 — replaced by --users-config
 @click.option("--read-users", default=None, hidden=True)
@@ -102,7 +110,7 @@ def _configure_logging(log_file: Path | None) -> None:
     "trusted_auth_proxies",
     multiple=True,
     help="Trusted proxy IP/CIDR allowed to supply --user-header. "
-         "Repeat for multiple proxies. Required for standalone LDAPGate proxy mode.",
+    "Repeat for multiple proxies. Required for standalone LDAPGate proxy mode.",
 )
 @click.option(
     "--reload", is_flag=True, default=False, help="Auto-reload on code changes (dev)."
@@ -263,27 +271,43 @@ def _audit_db_path(value: Path | None) -> Path:
 
 def _print_audit_events(events: list[dict]) -> None:
     for event in events:
-        click.echo(f"{event['occurred_at']} {event['username']} {event['method']} {event['path']} status={event['status_code']} {event['duration_ms']}ms")
+        click.echo(
+            f"{event['occurred_at']} {event['username']} {event['method']} {event['path']} status={event['status_code']} {event['duration_ms']}ms"
+        )
         if event["details"]:
             click.echo(f"  {event['details']}")
 
 
 @main.group(invoke_without_command=True)
-@click.option("--audit-db", type=click.Path(dir_okay=False, path_type=Path), default=None)
+@click.option(
+    "--audit-db", type=click.Path(dir_okay=False, path_type=Path), default=None
+)
 @click.option("--user", "username", default=None)
 @click.option("--since", default=None, help="ISO date/time, for example 2026-06-21.")
 @click.option("--limit", default=100, show_default=True, type=click.IntRange(1, 10000))
 @click.pass_context
-def audit(ctx: click.Context, audit_db: Path | None, username: str | None, since: str | None, limit: int):
+def audit(
+    ctx: click.Context,
+    audit_db: Path | None,
+    username: str | None,
+    since: str | None,
+    limit: int,
+):
     """Read or purge authenticated X-wing activity."""
     if ctx.invoked_subcommand is None:
         db_path = _audit_db_path(audit_db)
         audit_store.init_db(db_path)
-        _print_audit_events(audit_store.list_events(db_path, username=username, since=since, limit=limit))
+        _print_audit_events(
+            audit_store.list_events(
+                db_path, username=username, since=since, limit=limit
+            )
+        )
 
 
 @audit.command("purge")
-@click.option("--audit-db", type=click.Path(dir_okay=False, path_type=Path), default=None)
+@click.option(
+    "--audit-db", type=click.Path(dir_okay=False, path_type=Path), default=None
+)
 @click.option("--older-than", default=90, show_default=True, type=click.IntRange(1))
 def audit_purge(audit_db: Path | None, older_than: int):
     """Purge old audit rows."""

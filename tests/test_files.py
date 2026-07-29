@@ -60,7 +60,13 @@ class TestHumanSize:
 
 class TestIgnoredSystemFiles:
     def test_ignores_os_metadata_names(self):
-        for name in (".DS_Store", "Thumbs.db", "desktop.ini", "._notes.txt", "__MACOSX"):
+        for name in (
+            ".DS_Store",
+            "Thumbs.db",
+            "desktop.ini",
+            "._notes.txt",
+            "__MACOSX",
+        ):
             assert is_ignored_system_file(name)
 
     def test_does_not_ignore_normal_dotfiles(self):

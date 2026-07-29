@@ -137,7 +137,9 @@ def _validate_session_owner_and_chunk(
         raise HTTPException(status_code=400, detail="Invalid chunk index")
 
 
-def _session_chunk_bytes(session: dict, tmp_dir: Path, session_id: str) -> dict[str, int]:
+def _session_chunk_bytes(
+    session: dict, tmp_dir: Path, session_id: str
+) -> dict[str, int]:
     chunk_bytes = session.get("chunk_bytes")
     if isinstance(chunk_bytes, dict):
         return {str(k): int(v) for k, v in chunk_bytes.items()}
@@ -314,7 +316,9 @@ def create_upload_router(settings: Settings) -> APIRouter:
         direct_chunk_size = None
         async with _session_lock(session_id):
             session = await _load_session(settings.tmp_dir, session_id)  # type: ignore[union-attr]
-            _validate_session_owner_and_chunk(session, user=user, chunk_index=chunk_index)
+            _validate_session_owner_and_chunk(
+                session, user=user, chunk_index=chunk_index
+            )
             assert session is not None
             if "chunk_size" in session and "temp_file" in session:
                 direct_chunk_size = int(session["chunk_size"])
@@ -364,7 +368,9 @@ def create_upload_router(settings: Settings) -> APIRouter:
             and session is not None
             and chunk_index < session["total_chunks"] - 1
         ):
-            raise HTTPException(status_code=400, detail="Non-final chunk has wrong size")
+            raise HTTPException(
+                status_code=400, detail="Non-final chunk has wrong size"
+            )
 
         async with _session_lock(session_id):
             session = await _load_session(settings.tmp_dir, session_id)  # type: ignore[union-attr]
@@ -374,12 +380,15 @@ def create_upload_router(settings: Settings) -> APIRouter:
                 )
                 assert session is not None
                 chunk_bytes = _session_chunk_bytes(
-                    session, settings.tmp_dir, session_id  # type: ignore[arg-type]
+                    session,
+                    settings.tmp_dir,
+                    session_id,  # type: ignore[arg-type]
                 )
                 old_chunk_bytes = chunk_bytes.get(str(chunk_index), 0)
-                prior_total_bytes = int(
-                    session.get("total_bytes", sum(chunk_bytes.values()))
-                ) - old_chunk_bytes
+                prior_total_bytes = (
+                    int(session.get("total_bytes", sum(chunk_bytes.values())))
+                    - old_chunk_bytes
+                )
 
                 if prior_total_bytes + received_bytes > settings.max_upload_bytes:
                     raise HTTPException(
@@ -435,7 +444,9 @@ def create_upload_router(settings: Settings) -> APIRouter:
                     if "temp_file" in session:
                         temp_file = Path(session["temp_file"])
                         if not is_within_root(settings.root_dir, temp_file):
-                            raise HTTPException(status_code=403, detail="Forbidden temp file")
+                            raise HTTPException(
+                                status_code=403, detail="Forbidden temp file"
+                            )
                         async with await anyio.open_file(temp_file, "r+b") as out:
                             await out.truncate(int(session.get("total_bytes", 0)))
                         await anyio.to_thread.run_sync(temp_file.replace, dest_file)  # type: ignore[reportAttributeAccessIssue]
@@ -451,7 +462,9 @@ def create_upload_router(settings: Settings) -> APIRouter:
                         async with await anyio.open_file(temp_file, "wb") as out:
                             for i in range(total):
                                 chunk_path = tmp_dir / f"{i}.part"
-                                async with await anyio.open_file(chunk_path, "rb") as inp:
+                                async with await anyio.open_file(
+                                    chunk_path, "rb"
+                                ) as inp:
                                     while True:
                                         data = await inp.read(settings.chunk_read_size)
                                         if not data:

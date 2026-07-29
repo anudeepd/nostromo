@@ -154,7 +154,9 @@ async def copy_response(src: Path, dest: Path, overwrite: bool) -> Response:
         temp_handle.close()
     try:
         if src.is_dir():
-            await anyio.to_thread.run_sync(lambda: shutil.copytree(src, temp_dest, symlinks=True))  # type: ignore[reportAttributeAccessIssue]
+            await anyio.to_thread.run_sync(
+                lambda: shutil.copytree(src, temp_dest, symlinks=True)
+            )  # type: ignore[reportAttributeAccessIssue]
         else:
             await anyio.to_thread.run_sync(lambda: shutil.copy2(src, temp_dest))  # type: ignore[reportAttributeAccessIssue]
         await anyio.to_thread.run_sync(_install_staged_path, temp_dest, dest)  # type: ignore[reportAttributeAccessIssue]

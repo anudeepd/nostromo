@@ -214,7 +214,6 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
   }, []);
 
   const files = useMemo(() => sortFiles(directory.files, sort), [directory.files, sort]);
-  const selectedFiles = files.filter(file => selected.has(file.path));
 
   const updateSort = (key: SortKey): void => {
     setSort(current => {
@@ -233,9 +232,11 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
       const shouldSelect = !current.has(file.path);
       if (gesture.range) {
         for (const path of selectionRange(files, lastSelected, index)) {
-          shouldSelect ? next.add(path) : next.delete(path);
+          if (shouldSelect) next.add(path);
+          else next.delete(path);
         }
-      } else shouldSelect ? next.add(file.path) : next.delete(file.path);
+      } else if (shouldSelect) next.add(file.path);
+      else next.delete(file.path);
       return next;
     });
     setLastSelected(file.path);
@@ -566,7 +567,7 @@ function DialogView({ dialog, setDialog, onMkdir, onDelete }: { dialog: Exclude<
   useEffect(() => {
     if (!pending && modalRef.current && !modalRef.current.contains(document.activeElement)) confirmRef.current?.focus();
   }, [pending, modalRef]);
-  return <div ref={modalRef} className={`modal-backdrop ${closing ? "closing" : ""}`} onMouseDown={event => { if (event.target === event.currentTarget) close(); }}><form className="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-description" onSubmit={event => { event.preventDefault(); mkdir ? onMkdir() : onDelete(); }}>
+  return <div ref={modalRef} className={`modal-backdrop ${closing ? "closing" : ""}`} onMouseDown={event => { if (event.target === event.currentTarget) close(); }}><form className="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-description" onSubmit={event => { event.preventDefault(); if (mkdir) onMkdir(); else onDelete(); }}>
     <h2 id="dialog-title">{mkdir ? "New folder" : `Delete ${dialog.paths.length} item${dialog.paths.length === 1 ? "" : "s"}?`}</h2>
     <p id="dialog-description">{mkdir ? "Create a folder in the current directory." : "The items will move to X-wing’s recoverable trash."}</p>
     {mkdir && <label>Folder name<input data-autofocus value={dialog.value} onChange={event => setDialog({ ...dialog, value: event.target.value, error: undefined })}/></label>}

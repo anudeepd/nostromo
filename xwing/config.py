@@ -165,14 +165,20 @@ class Settings(BaseModel):
                 Path(tempfile.gettempdir()) / f"xwing-{self.root_dir.name}-{root_hash}"
             )
         # Honour the environment override in both normal and reload startup.
-        if self.audit_db is None and (configured_audit_db := os.getenv("XWING_AUDIT_DB")):
+        if self.audit_db is None and (
+            configured_audit_db := os.getenv("XWING_AUDIT_DB")
+        ):
             self.audit_db = Path(configured_audit_db).expanduser()
         # Audit authenticated deployments by default. Supplying audit_db also
         # enables it for externally-authenticated (e.g. standalone LDAPGate) use.
         if self.audit_db is None and (
-            self.ldap_config is not None or os.getenv("XWING_LDAP_CONFIG") or self.require_auth
+            self.ldap_config is not None
+            or os.getenv("XWING_LDAP_CONFIG")
+            or self.require_auth
         ):
-            data_home = Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+            data_home = Path(
+                os.getenv("XDG_DATA_HOME", Path.home() / ".local" / "share")
+            )
             self.audit_db = data_home / "xwing" / "audit.db"
         return self
 
@@ -185,7 +191,11 @@ class Settings(BaseModel):
                     self._user_config = UserConfig(self.users_config)
                     self._config_mtime = mtime
             except OSError as e:
-                logger.warning("Could not stat users config %s: %s — using cached permissions", self.users_config, e)
+                logger.warning(
+                    "Could not stat users config %s: %s — using cached permissions",
+                    self.users_config,
+                    e,
+                )
             if self._user_config is not None:
                 return self._user_config.get(user)
         return _DEFAULT_PERMS

@@ -38,7 +38,9 @@ def editor_bootstrap(response):
 
 
 class TestDirectoryListing:
-    def test_vendor_directory_contract_is_versioned_and_varies_on_accept(self, client, root):
+    def test_vendor_directory_contract_is_versioned_and_varies_on_accept(
+        self, client, root
+    ):
         (root / "docs").mkdir()
         (root / "notes.txt").write_text("hello")
 
@@ -88,7 +90,9 @@ class TestDirectoryListing:
         assert data["user"] == {"name": "alice", "authenticated": True}
         assert data["files"][0]["name"] == "hello.txt"
         source = (Path(__file__).parents[1] / "xwing/frontend/src/app.tsx").read_text()
-        sort_source = (Path(__file__).parents[1] / "xwing/frontend/src/sort.ts").read_text()
+        sort_source = (
+            Path(__file__).parents[1] / "xwing/frontend/src/sort.ts"
+        ).read_text()
         assert 'type SortKey = "name" | "size" | "modified"' in sort_source
         assert 'SORT_STORAGE_VERSION = "v2"' in source
 
@@ -102,8 +106,8 @@ class TestDirectoryListing:
         assert 'id="xwing-root"' in r.text
         source = (Path(__file__).parents[1] / "xwing/frontend/src/app.tsx").read_text()
         assert 'className="skip-link" href="#file-list"' in source
-        assert 'aria-label={`Download ${file.name}`}' in source
-        assert 'aria-label={`Delete ${file.name}`}' in source
+        assert "aria-label={`Download ${file.name}`}" in source
+        assert "aria-label={`Delete ${file.name}`}" in source
 
     def test_listing_has_selection_and_item_counts(self, client, root):
         (root / "notes.txt").write_text("hi")
@@ -149,7 +153,10 @@ class TestDirectoryListing:
         data = bootstrap(r)
         assert data["files"] == []
         assert data["permissions"]["write"] is True
-        assert "This folder is empty" in (Path(__file__).parents[1] / "xwing/frontend/src/app.tsx").read_text()
+        assert (
+            "This folder is empty"
+            in (Path(__file__).parents[1] / "xwing/frontend/src/app.tsx").read_text()
+        )
 
     def test_empty_state_omits_ctas_for_read_only_user(self, root, tmp_dir, tmp_path):
         users_yaml = tmp_path / "users.yaml"
@@ -264,7 +271,9 @@ class TestAuth:
             r = c.get("/notes.txt?edit", headers={**HTML, "X-Forwarded-User": "alice"})
         assert r.status_code == 200
         assert 'id="xwing-editor-bootstrap"' in r.text
-        source = (Path(__file__).parents[1] / "xwing/frontend/src/editor.tsx").read_text()
+        source = (
+            Path(__file__).parents[1] / "xwing/frontend/src/editor.tsx"
+        ).read_text()
         assert 'id="logout-form" method="post" action="/_auth/logout"' in source
         assert "confirmLeave" in source
         assert 'href="/_auth/logout"' not in r.text
@@ -298,13 +307,24 @@ class TestAuth:
         r = client.get("/notes.txt?edit", headers=HTML)
         assert r.status_code == 200
         assert 'id="xwing-editor-bootstrap"' in r.text
-        assert "setStatus" in (Path(__file__).parents[1] / "xwing/frontend/src/editor.tsx").read_text()
+        assert (
+            "setStatus"
+            in (Path(__file__).parents[1] / "xwing/frontend/src/editor.tsx").read_text()
+        )
 
     def test_login_template_avoids_inline_style_attributes(self):
-        template = (Path(__file__).parents[1] / "xwing" / "templates" / "login.html").read_text()
-        assert '<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">' in template
+        template = (
+            Path(__file__).parents[1] / "xwing" / "templates" / "login.html"
+        ).read_text()
+        assert (
+            '<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">'
+            in template
+        )
         assert '<style nonce="{{ csrf_nonce }}">' in template
-        assert '<input type="hidden" name="csrf_token" value="{{ csrf_token }}">' in template
+        assert (
+            '<input type="hidden" name="csrf_token" value="{{ csrf_token }}">'
+            in template
+        )
         assert "xwing-card-in" in template
         assert "xwing-error-up" in template
         assert "xwing:login:username" in template
@@ -322,7 +342,9 @@ class TestAuth:
         assert 'style="' not in template
 
     def test_login_template_keeps_ldapgate_shape_with_brand_safe_deltas(self):
-        template = (Path(__file__).parents[1] / "xwing" / "templates" / "login.html").read_text()
+        template = (
+            Path(__file__).parents[1] / "xwing" / "templates" / "login.html"
+        ).read_text()
         assert "Secured by" in template
         assert "LDAPGate" in template
         assert "font-display: swap" in template
@@ -333,7 +355,9 @@ class TestAuth:
         assert "letter-spacing: -0.025em" not in template
         assert "#3b82f6" not in template
 
-    def test_read_only_listing_warns_and_disables_write_controls(self, root, tmp_dir, tmp_path):
+    def test_read_only_listing_warns_and_disables_write_controls(
+        self, root, tmp_dir, tmp_path
+    ):
         users_yaml = tmp_path / "users.yaml"
         users_yaml.write_text("users:\n  alice: r\n")
         s = Settings(
@@ -433,7 +457,9 @@ class TestAuth:
         ]
         assert calls["config"].proxy.session_cookie_name == "xwing_session"
 
-    def test_ldap_config_inherits_xwing_trusted_proxies_when_unset(self, root, tmp_dir, monkeypatch):
+    def test_ldap_config_inherits_xwing_trusted_proxies_when_unset(
+        self, root, tmp_dir, monkeypatch
+    ):
         calls = {}
 
         ldapgate_pkg = types.ModuleType("ldapgate")
@@ -535,7 +561,9 @@ class TestAuth:
 
         assert "dirty && !allowLeave.current" in editor_script
 
-    def test_ldap_idle_timeout_is_rendered_for_frontend_timer(self, root, tmp_dir, monkeypatch):
+    def test_ldap_idle_timeout_is_rendered_for_frontend_timer(
+        self, root, tmp_dir, monkeypatch
+    ):
         ldapgate_pkg = types.ModuleType("ldapgate")
         config_mod = types.ModuleType("ldapgate.config")
         middleware_mod = types.ModuleType("ldapgate.middleware")
@@ -581,16 +609,21 @@ class TestAuth:
 
         assert listing.status_code == 200
         assert editor.status_code == 200
-        assert '/static/assets/style.css' in listing.text
-        assert '/static/assets/app.js' in listing.text
-        assert '/static/assets/style.css' in editor.text
-        assert '/static/assets/editor.js' in editor.text
-        assert '/static/app.js' not in listing.text
-        assert '/static/editor.js' not in editor.text
+        assert "/static/assets/style.css" in listing.text
+        assert "/static/assets/app.js" in listing.text
+        assert "/static/assets/style.css" in editor.text
+        assert "/static/assets/editor.js" in editor.text
+        assert "/static/app.js" not in listing.text
+        assert "/static/editor.js" not in editor.text
 
     def test_frontend_prevents_document_overscroll_bounce(self):
-        stylesheet = (Path(__file__).parents[1] / "xwing" / "frontend" / "src" / "style.css").read_text()
-        assert "html, body {\n  height: 100%;\n  overscroll-behavior: none;\n}" in stylesheet
+        stylesheet = (
+            Path(__file__).parents[1] / "xwing" / "frontend" / "src" / "style.css"
+        ).read_text()
+        assert (
+            "html, body {\n  height: 100%;\n  overscroll-behavior: none;\n}"
+            in stylesheet
+        )
 
 
 class TestPut:
@@ -627,7 +660,9 @@ class TestPut:
             assert not (root / path.lstrip("/")).exists()
 
     def test_put_exceeds_max_upload_bytes_returns_413(self, root, tmp_dir, users_yaml):
-        s = Settings(root_dir=root, tmp_dir=tmp_dir, max_upload_bytes=10, users_config=users_yaml)
+        s = Settings(
+            root_dir=root, tmp_dir=tmp_dir, max_upload_bytes=10, users_config=users_yaml
+        )
         with TestClient(create_app(s)) as c:
             r = c.put("/large.txt", content=b"x" * 100)
         assert r.status_code == 413
@@ -694,6 +729,35 @@ class TestZip:
         assert r.headers["content-type"] == "application/zip"
         zf = zipfile.ZipFile(io.BytesIO(r.content))
         assert len(zf.namelist()) == 0
+
+    def test_zip_rejects_archive_over_total_size_limit(self, root, tmp_dir, users_yaml):
+        (root / "large.bin").write_bytes(b"x" * 11)
+        settings = Settings(
+            root_dir=root,
+            tmp_dir=tmp_dir,
+            users_config=users_yaml,
+            max_upload_bytes=10,
+        )
+        with TestClient(create_app(settings)) as client:
+            r = client.get("/?zip")
+        assert r.status_code == 413
+        assert r.json()["detail"] == "Archive exceeds total size limit"
+
+    def test_zip_rejects_archive_over_entry_count_limit(
+        self, root, tmp_dir, users_yaml
+    ):
+        (root / "a.txt").write_text("a")
+        (root / "b.txt").write_text("b")
+        settings = Settings(
+            root_dir=root,
+            tmp_dir=tmp_dir,
+            users_config=users_yaml,
+            max_chunks=1,
+        )
+        with TestClient(create_app(settings)) as client:
+            r = client.get("/?zip")
+        assert r.status_code == 413
+        assert r.json()["detail"] == "Archive exceeds entry count limit"
 
     def test_zip_skips_symlink_outside_root(self, client, root, tmp_path):
         outside = tmp_path.parent / f"{tmp_path.name}-outside-secret.txt"
@@ -766,7 +830,9 @@ class TestZip:
         assert disposition.endswith(".zip")
 
     def test_timestamped_selection_zip_name_uses_utc_compact_timestamp(self):
-        name = timestamped_selection_zip_name(datetime(2026, 6, 17, 1, 2, 3, tzinfo=timezone.utc))
+        name = timestamped_selection_zip_name(
+            datetime(2026, 6, 17, 1, 2, 3, tzinfo=timezone.utc)
+        )
         assert name == "xwing-selection-20260617-010203.zip"
 
     def test_bulk_zip_rejects_sensitive_paths(self, client, root):
@@ -1126,9 +1192,17 @@ class TestWebDavLocking:
 
         xml = ET.fromstring(r.content)
         ns = {"D": "DAV:"}
-        assert xml.find("./D:lockdiscovery/D:activelock/D:lockscope/D:exclusive", ns) is not None
-        assert xml.find("./D:lockdiscovery/D:activelock/D:locktype/D:write", ns) is not None
-        token = xml.findtext("./D:lockdiscovery/D:activelock/D:locktoken/D:href", namespaces=ns)
+        assert (
+            xml.find("./D:lockdiscovery/D:activelock/D:lockscope/D:exclusive", ns)
+            is not None
+        )
+        assert (
+            xml.find("./D:lockdiscovery/D:activelock/D:locktype/D:write", ns)
+            is not None
+        )
+        token = xml.findtext(
+            "./D:lockdiscovery/D:activelock/D:locktoken/D:href", namespaces=ns
+        )
         assert token is not None
         assert r.headers["lock-token"] == f"<{token}>"
 
@@ -1150,7 +1224,9 @@ class TestWebDavLocking:
 
         propfind = client.request("PROPFIND", staged_path, headers={"Depth": "0"})
         assert propfind.status_code == 207
-        assert (root / "test" / "sample.txt.sb-0f9dfb64-wbRrpW" / "samplte.txt").read_bytes() == b"draft"
+        assert (
+            root / "test" / "sample.txt.sb-0f9dfb64-wbRrpW" / "samplte.txt"
+        ).read_bytes() == b"draft"
 
 
 class TestEnvFile:

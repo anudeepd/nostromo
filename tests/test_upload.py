@@ -201,7 +201,9 @@ class TestUploadLifecycle:
         assert not temp_file.exists()
 
     def test_direct_chunk_retry_truncates_old_tail_on_complete(self, client, root):
-        sid = self._init_direct(client, "retry-direct.txt", total_chunks=2, chunk_size=3)
+        sid = self._init_direct(
+            client, "retry-direct.txt", total_chunks=2, chunk_size=3
+        )
         assert client.put(f"/_upload/{sid}/0", content=b"aaa").status_code == 204
         assert client.put(f"/_upload/{sid}/1", content=b"bbb").status_code == 204
         assert client.put(f"/_upload/{sid}/1", content=b"c").status_code == 204
@@ -232,7 +234,9 @@ class TestUploadLifecycle:
         session_file = tmp_dir / sid / "session.json"
         assert not session_file.exists()
 
-    def test_complete_failure_preserves_existing_destination(self, client, root, tmp_dir):
+    def test_complete_failure_preserves_existing_destination(
+        self, client, root, tmp_dir
+    ):
         (root / "existing.txt").write_text("keep me")
         sid = self._init(client, "existing.txt", total_chunks=1)
         client.put(f"/_upload/{sid}/0", content=b"new data")
@@ -341,8 +345,11 @@ class TestUploadAuth:
 
     def test_init_allowed_with_user_header(self, root, tmp_dir, users_yaml):
         s = Settings(
-            root_dir=root, tmp_dir=tmp_dir, require_auth=True,
-            users_config=users_yaml, trusted_auth_proxies=["testclient"]
+            root_dir=root,
+            tmp_dir=tmp_dir,
+            require_auth=True,
+            users_config=users_yaml,
+            trusted_auth_proxies=["testclient"],
         )
         with TestClient(create_app(s)) as c:
             r = c.post(
@@ -368,10 +375,15 @@ class TestUploadAuth:
 class TestUploadSessionIsolation:
     def test_alice_cannot_write_to_bobs_session(self, root, tmp_dir, tmp_path):
         users_yaml = tmp_path / "users.yaml"
-        users_yaml.write_text("users:\n  alice:\n    read: true\n    write: true\n    delete: true\n")
+        users_yaml.write_text(
+            "users:\n  alice:\n    read: true\n    write: true\n    delete: true\n"
+        )
         s = Settings(
-            root_dir=root, tmp_dir=tmp_dir, require_auth=True,
-            users_config=users_yaml, trusted_auth_proxies=["testclient"]
+            root_dir=root,
+            tmp_dir=tmp_dir,
+            require_auth=True,
+            users_config=users_yaml,
+            trusted_auth_proxies=["testclient"],
         )
         with TestClient(create_app(s)) as c:
             r = c.post(
@@ -389,10 +401,15 @@ class TestUploadSessionIsolation:
 
     def test_alice_cannot_complete_bobs_session(self, root, tmp_dir, tmp_path):
         users_yaml = tmp_path / "users.yaml"
-        users_yaml.write_text("users:\n  alice:\n    read: true\n    write: true\n    delete: true\n")
+        users_yaml.write_text(
+            "users:\n  alice:\n    read: true\n    write: true\n    delete: true\n"
+        )
         s = Settings(
-            root_dir=root, tmp_dir=tmp_dir, require_auth=True,
-            users_config=users_yaml, trusted_auth_proxies=["testclient"]
+            root_dir=root,
+            tmp_dir=tmp_dir,
+            require_auth=True,
+            users_config=users_yaml,
+            trusted_auth_proxies=["testclient"],
         )
         with TestClient(create_app(s)) as c:
             r = c.post(

@@ -35,18 +35,39 @@ def init_db(path: Path) -> None:
         pass
 
 
-def record_event(*, db_path: Path, username: str, method: str, path: str,
-                 details: str | None, status_code: int, duration_ms: float) -> None:
+def record_event(
+    *,
+    db_path: Path,
+    username: str,
+    method: str,
+    path: str,
+    details: str | None,
+    status_code: int,
+    duration_ms: float,
+) -> None:
     with sqlite3.connect(db_path) as db:
         db.execute(
             "INSERT INTO audit_events (occurred_at, username, method, path, details, status_code, duration_ms) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (datetime.now(timezone.utc).isoformat(), username, method, path, details, status_code, duration_ms),
+            (
+                datetime.now(timezone.utc).isoformat(),
+                username,
+                method,
+                path,
+                details,
+                status_code,
+                duration_ms,
+            ),
         )
 
 
-def list_events(db_path: Path, *, username: str | None = None, since: str | None = None,
-                limit: int = 100) -> list[dict]:
+def list_events(
+    db_path: Path,
+    *,
+    username: str | None = None,
+    since: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
     clauses: list[str] = []
     values: list[object] = []
     if username:
@@ -60,7 +81,8 @@ def list_events(db_path: Path, *, username: str | None = None, since: str | None
         db.row_factory = sqlite3.Row
         rows = db.execute(
             "SELECT occurred_at, username, method, path, details, status_code, duration_ms "
-            f"FROM audit_events{where} ORDER BY id DESC LIMIT ?", (*values, limit),
+            f"FROM audit_events{where} ORDER BY id DESC LIMIT ?",
+            (*values, limit),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -72,10 +94,23 @@ def purge_events(db_path: Path, older_than_days: int) -> int:
         return cursor.rowcount
 
 
-async def record_event_async(*, db_path: Path, username: str, method: str, path: str,
-                             details: str | None, status_code: int, duration_ms: float) -> None:
+async def record_event_async(
+    *,
+    db_path: Path,
+    username: str,
+    method: str,
+    path: str,
+    details: str | None,
+    status_code: int,
+    duration_ms: float,
+) -> None:
     await asyncio.to_thread(
         record_event,
-        db_path=db_path, username=username, method=method, path=path,
-        details=details, status_code=status_code, duration_ms=duration_ms,
+        db_path=db_path,
+        username=username,
+        method=method,
+        path=path,
+        details=details,
+        status_code=status_code,
+        duration_ms=duration_ms,
     )

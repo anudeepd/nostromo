@@ -16,7 +16,7 @@ from urllib.parse import quote, unquote, urlparse
 
 import anyio
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -57,6 +57,7 @@ def _configure_log_file_from_env() -> None:
         datefmt="%H:%M:%S",
         handlers=[logging.StreamHandler(), logging.FileHandler(path, encoding="utf-8")],
     )
+
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -182,6 +183,7 @@ def create_app_reload() -> FastAPI:
 
 def create_app(settings: Settings) -> FastAPI:
     settings.tmp_dir.mkdir(parents=True, exist_ok=True)  # type: ignore[union-attr]
+    directory_zip_semaphore = anyio.Semaphore(1)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -273,9 +275,11 @@ def create_app(settings: Settings) -> FastAPI:
     @app.middleware("http")
     async def authenticated_activity_audit(request: Request, call_next):
         started = time.monotonic()
-        details = await _audit_details(request) if (
-            settings.audit_db and not _skip_generic_audit(request)
-        ) else None
+        details = (
+            await _audit_details(request)
+            if (settings.audit_db and not _skip_generic_audit(request))
+            else None
+        )
         response = await call_next(request)
         if not settings.audit_db or _skip_generic_audit(request):
             return response
@@ -286,8 +290,11 @@ def create_app(settings: Settings) -> FastAPI:
         if user != "anonymous":
             try:
                 await audit_store.record_event_async(
-                    db_path=settings.audit_db, username=user, method=request.method,
-                    path=request.url.path, details=details,
+                    db_path=settings.audit_db,
+                    username=user,
+                    method=request.method,
+                    path=request.url.path,
+                    details=details,
                     status_code=response.status_code,
                     duration_ms=round((time.monotonic() - started) * 1000, 2),
                 )
@@ -436,7 +443,11 @@ def create_app(settings: Settings) -> FastAPI:
             settings.tmp_dir.resolve(),
             *(
                 path.resolve()
-                for path in (settings.users_config, settings.ldap_config, settings.audit_db)
+                for path in (
+                    settings.users_config,
+                    settings.ldap_config,
+                    settings.audit_db,
+                )
                 if path is not None
             ),
         ]
@@ -495,7 +506,9 @@ def create_app(settings: Settings) -> FastAPI:
     async def _soft_delete_paths(paths: list[Path], user: str) -> dict:
         txid = uuid.uuid4().hex
         trash_dir = _trash_dir()
-        await anyio.to_thread.run_sync(lambda: trash_dir.mkdir(parents=True, exist_ok=True))
+        await anyio.to_thread.run_sync(
+            lambda: trash_dir.mkdir(parents=True, exist_ok=True)
+        )
         paths_to_delete = _top_level_paths(paths)
         for fspath in paths_to_delete:
             if not fspath.exists():
@@ -504,7 +517,9 @@ def create_app(settings: Settings) -> FastAPI:
                 raise HTTPException(status_code=403, detail="Cannot delete root")
             _reject_sensitive_path(fspath)
             if _is_internal_path(fspath):
-                raise HTTPException(status_code=403, detail="Cannot delete internal paths")
+                raise HTTPException(
+                    status_code=403, detail="Cannot delete internal paths"
+                )
         items = []
         for index, fspath in enumerate(paths_to_delete):
             trash_path = trash_dir / _trash_name(fspath, txid, index)
@@ -618,7 +633,10 @@ def create_app(settings: Settings) -> FastAPI:
             operation="delete",
             path=rel_path,
             details=json.dumps(
-                {"count": deleted["count"], "transaction_id": deleted["transaction_id"]},
+                {
+                    "count": deleted["count"],
+                    "transaction_id": deleted["transaction_id"],
+                },
                 ensure_ascii=False,
             ),
             status_code=response.status_code,
@@ -694,9 +712,7 @@ def create_app(settings: Settings) -> FastAPI:
                 FilePayload(
                     name=entry["name"],
                     path=(
-                        url_path
-                        + entry["url_name"]
-                        + ("/" if entry["is_dir"] else "")
+                        url_path + entry["url_name"] + ("/" if entry["is_dir"] else "")
                     ),
                     kind="directory" if entry["is_dir"] else "file",
                     size=None if entry["is_dir"] else entry["size"],
@@ -780,23 +796,74 @@ def create_app(settings: Settings) -> FastAPI:
     async def _zip_response(fspath: Path, root: Path) -> Response:
         zip_name = (fspath.name or "archive") + ".zip"
 
-        def _build() -> bytes:
-            buf = io.BytesIO()
-            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                for child in sorted(fspath.rglob("*")):
-                    if (
-                        child.is_file()
-                        and is_within_root(root, child)
-                        and not _is_sensitive_path(child)
-                        and not _is_internal_path(child)
-                        and not _is_ignored_system_path(child)
-                    ):
-                        zf.write(child, child.relative_to(fspath))
-            return buf.getvalue()
+        def _collect_files() -> list[Path]:
+            files: list[Path] = []
+            total_bytes = 0
+            visited_entries = 0
+            for child in fspath.rglob("*"):
+                visited_entries += 1
+                if visited_entries > settings.max_chunks:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Archive exceeds entry count limit",
+                    )
+                if (
+                    child.is_file()
+                    and is_within_root(root, child)
+                    and not _is_sensitive_path(child)
+                    and not _is_internal_path(child)
+                    and not _is_ignored_system_path(child)
+                ):
+                    total_bytes += child.stat().st_size
+                    if total_bytes > settings.max_upload_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail="Archive exceeds total size limit",
+                        )
+                    files.append(child)
+            return sorted(files)
 
-        zip_bytes = await anyio.to_thread.run_sync(_build)  # type: ignore[reportAttributeAccessIssue]
-        return Response(
-            zip_bytes,
+        await directory_zip_semaphore.acquire()
+        try:
+            files = await anyio.to_thread.run_sync(_collect_files)  # type: ignore[reportAttributeAccessIssue]
+            archive = tempfile.TemporaryFile(dir=settings.tmp_dir)
+
+            def _build() -> None:
+                total_bytes = 0
+                with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for child in files:
+                        info = zipfile.ZipInfo.from_file(
+                            child, child.relative_to(fspath).as_posix()
+                        )
+                        info.compress_type = zipfile.ZIP_DEFLATED
+                        with child.open("rb") as source, zf.open(info, "w") as target:
+                            while chunk := source.read(settings.chunk_read_size):
+                                total_bytes += len(chunk)
+                                if total_bytes > settings.max_upload_bytes:
+                                    raise HTTPException(
+                                        status_code=413,
+                                        detail="Archive exceeds total size limit",
+                                    )
+                                target.write(chunk)
+                archive.seek(0)
+
+            await anyio.to_thread.run_sync(_build)  # type: ignore[reportAttributeAccessIssue]
+        except BaseException:
+            if "archive" in locals():
+                archive.close()
+            directory_zip_semaphore.release()
+            raise
+
+        async def _stream():
+            try:
+                while chunk := await anyio.to_thread.run_sync(archive.read, 64 * 1024):  # type: ignore[reportAttributeAccessIssue]
+                    yield chunk
+            finally:
+                archive.close()
+                directory_zip_semaphore.release()
+
+        return StreamingResponse(
+            _stream(),
             media_type="application/zip",
             headers={
                 "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}"
@@ -824,7 +891,9 @@ def create_app(settings: Settings) -> FastAPI:
         seen: set[Path] = set()
         for raw in raw_paths:
             if not isinstance(raw, str):
-                raise HTTPException(status_code=400, detail="paths entries must be strings")
+                raise HTTPException(
+                    status_code=400, detail="paths entries must be strings"
+                )
             try:
                 fspath = safe_path(settings.root_dir, unquote(raw))
             except PermissionError:
@@ -896,7 +965,9 @@ def create_app(settings: Settings) -> FastAPI:
         try:
             zip_bytes = await anyio.to_thread.run_sync(_zip_selected, paths, base_path)  # type: ignore[reportAttributeAccessIssue]
         except FileNotFoundError:
-            raise HTTPException(status_code=404, detail="Selected path not found") from None
+            raise HTTPException(
+                status_code=404, detail="Selected path not found"
+            ) from None
         return Response(
             zip_bytes,
             media_type="application/zip",
@@ -948,7 +1019,9 @@ def create_app(settings: Settings) -> FastAPI:
         if not transaction:
             raise HTTPException(status_code=404, detail="Delete transaction not found")
         if transaction["user"] != user:
-            raise HTTPException(status_code=403, detail="Cannot restore another user's delete")
+            raise HTTPException(
+                status_code=403, detail="Cannot restore another user's delete"
+            )
 
         restored = 0
         restored_paths = []
@@ -964,7 +1037,9 @@ def create_app(settings: Settings) -> FastAPI:
             restored_paths.append(_to_rel_path(target))
 
         delete_transactions.pop(transaction_id, None)
-        response = JSONResponse({"ok": True, "restored": restored, "paths": restored_paths})
+        response = JSONResponse(
+            {"ok": True, "restored": restored, "paths": restored_paths}
+        )
         await _record_semantic_audit(
             user=user,
             operation="restore",
@@ -1125,7 +1200,10 @@ def _ensure_ldapgate_cookie_name(config) -> None:
     proxy_config = getattr(config, "proxy", None)
     if proxy_config is None:
         return
-    if getattr(proxy_config, "session_cookie_name", "ldapgate_session") == "ldapgate_session":
+    if (
+        getattr(proxy_config, "session_cookie_name", "ldapgate_session")
+        == "ldapgate_session"
+    ):
         proxy_config.session_cookie_name = "xwing_session"
 
 

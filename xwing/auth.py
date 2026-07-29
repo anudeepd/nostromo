@@ -16,11 +16,15 @@ def get_user(request: Request, settings: Settings) -> str:
     client_ip = request.client.host if request.client else ""
     if not settings.is_trusted_auth_proxy(client_ip):
         if settings.require_auth:
-            raise HTTPException(status_code=403, detail="Untrusted authentication header")
+            raise HTTPException(
+                status_code=403, detail="Untrusted authentication header"
+            )
         return "anonymous"
     return user.lower()
 
 
 def require_perm(user: str, perm: str, settings: Settings) -> None:
     if not getattr(settings.perms_for(user), perm):
-        raise HTTPException(status_code=403, detail=f"{perm.capitalize()} permission denied")
+        raise HTTPException(
+            status_code=403, detail=f"{perm.capitalize()} permission denied"
+        )

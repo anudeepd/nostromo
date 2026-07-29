@@ -12,14 +12,21 @@ def test_audit_store_records_filters_and_purges(tmp_path):
     db_path = tmp_path / "audit.db"
     audit_store.init_db(db_path)
     audit_store.record_event(
-        db_path=db_path, username="alice", method="PUT", path="/notes.txt",
-        details="hello", status_code=204, duration_ms=1.5,
+        db_path=db_path,
+        username="alice",
+        method="PUT",
+        path="/notes.txt",
+        details="hello",
+        status_code=204,
+        duration_ms=1.5,
     )
     assert audit_store.list_events(db_path, username="alice")[0]["details"] == "hello"
     assert audit_store.purge_events(db_path, 0) == 1
 
 
-def test_authenticated_text_write_is_audited_as_upload(root, tmp_dir, users_yaml, tmp_path):
+def test_authenticated_text_write_is_audited_as_upload(
+    root, tmp_dir, users_yaml, tmp_path
+):
     db_path = tmp_path / "audit.db"
     settings = Settings(
         root_dir=root,
@@ -96,7 +103,9 @@ def test_authenticated_chunked_upload_audits_final_path_not_session_hash(
     assert json.loads(event["details"]) == {"bytes": 11, "chunks": 2}
 
 
-def test_authenticated_delete_is_semantically_audited(root, tmp_dir, users_yaml, tmp_path):
+def test_authenticated_delete_is_semantically_audited(
+    root, tmp_dir, users_yaml, tmp_path
+):
     db_path = tmp_path / "audit.db"
     (root / "old.txt").write_text("delete me")
     settings = Settings(
