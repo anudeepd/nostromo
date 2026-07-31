@@ -120,13 +120,12 @@ xwing serve --root /data --users-config users.yaml
 ```
 
 **`users.yaml` — compact format:**
-
 ```yaml
 users:
-  alice: rwd    # read + write + delete
-  bob: rw       # read + write, no delete
-  charlie: r    # read only
-  "*": r        # fallback for any unlisted user (omit to deny unlisted users)
+  alice: rwd     # read + write + delete
+  bob: rw        # read + write, no delete
+  charlie: r     # read only
+  "*": r         # fallback for any unlisted user (omit to deny unlisted users)
 ```
 
 **`users.yaml` — verbose format:**
@@ -139,7 +138,8 @@ users:
     delete: true
 ```
 
-Verbose field defaults when omitted: `read: true`, `write: false`, `delete: false`. Values must be `true` or `false`.
+Verbose field defaults when omitted: `read: true`, `write: false`, `delete: false`.
+Values must be `true` or `false`.
 
 Permission levels:
 
@@ -150,6 +150,44 @@ Permission levels:
 | `d`  | Delete and move files (DELETE, MOVE) |
 
 The config file is reloaded automatically when it changes on disk — no restart needed.
+
+### Admin console
+
+Configure admin identities separately from `users.yaml`:
+
+```bash
+xwing serve --root /data \
+  --users-config users.yaml \
+  --ldap-config ldapgate.yaml \
+  --admin-user alice \
+  --admin-user ops
+```
+
+Admin access requires an authenticated LDAPGate session (embedded middleware or a
+trusted LDAPGate reverse proxy) and a username listed with `--admin-user` or
+`XWING_ADMIN_USERS`. User permission files cannot grant administrator access.
+
+For standalone LDAPGate reverse-proxy mode, use the same `--trusted-auth-proxy`
+boundary instead of `--ldap-config`:
+
+```bash
+xwing serve --root /data --require-auth \
+  --users-config users.yaml \
+  --trusted-auth-proxy 127.0.0.1 \
+  --admin-user alice
+```
+
+Admin configuration is not editable from the console. LDAP authentication remains configured in
+`ldapgate.yaml`; the Users screen synchronizes each explicit user entry to both `users.yaml`
+permissions and `ldap.allowed_users`. Restart X-wing after adding or removing LDAP users.
+
+Console provides:
+
+- Per-user read/write/delete access management.
+- LDAP user allowlist synchronization when embedded LDAPGate is enabled.
+- Audit activity with user/date filters, status, paths, timing, current active-user counts, and retention purge.
+- Storage and usage summary.
+- Persistent recoverable trash with restore and permanent deletion controls.
 
 ## LDAP / Active Directory Authentication
 

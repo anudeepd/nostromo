@@ -1,8 +1,10 @@
 import io
 import json
 import re
+import sqlite3
 import sys
 import types
+import yaml
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -336,9 +338,12 @@ class TestAuth:
         assert ".submit-label { min-width: 4.75rem; }" in template
         assert "appearance: none;" in template
         assert "-webkit-appearance: none;" in template
-        assert "@supports (-moz-appearance: none)" in template
-        assert "padding-right: 0.75rem;" in template
-        assert 'id="password-toggle"' not in template
+        assert ".password-field" in template
+        assert "padding-right: 2.75rem;" in template
+        assert 'class="password-toggle"' in template
+        assert "password.type = visible ? 'text' : 'password';" in template
+        assert 'input[type="password"]::-ms-reveal' in template
+        assert 'input[type="password"]::-moz-reveal' in template
         assert 'style="' not in template
 
     def test_login_template_keeps_ldapgate_shape_with_brand_safe_deltas(self):
@@ -1392,3 +1397,237 @@ class TestPathTraversal:
             headers={"Destination": "http://localhost/../../etc/passwd"},
         )
         assert r.status_code == 403
+
+
+class TestAdminConsole:
+    def _settings(self, root, tmp_dir, tmp_path, monkeypatch, *, audit_db=None):
+        users = tmp_path / "users.yaml"
+        users.write_text("users:\n  admin: rwd\n  alice: rwd\n")
+        ldap_yaml = tmp_path / "ldapgate.yaml"
+        ldap_yaml.write_text(
+            "ldap:\n  bind_password: test-password\nproxy:\n  secret_key: test-secret\n"
+        )
+        ldapgate_pkg = types.ModuleType("ldapgate")
+        config_mod = types.ModuleType("ldapgate.config")
+        middleware_mod = types.ModuleType("ldapgate.middleware")
+        loaded_config = types.SimpleNamespace(
+            proxy=types.SimpleNamespace(
+                static_paths=[],
+                idle_timeout=0,
+                trusted_proxies=[],
+                session_cookie_name="ldapgate_session",
+            )
+        )
+        config_mod.load_config = lambda path: loaded_config
+        middleware_mod.add_ldap_auth = lambda app, config, template_path=None: None
+        monkeypatch.setitem(sys.modules, "ldapgate", ldapgate_pkg)
+        monkeypatch.setitem(sys.modules, "ldapgate.config", config_mod)
+        monkeypatch.setitem(sys.modules, "ldapgate.middleware", middleware_mod)
+        return Settings(
+            root_dir=root,
+            tmp_dir=tmp_dir,
+            require_auth=True,
+            users_config=users,
+            ldap_config=ldap_yaml,
+            admin_users=["admin"],
+            trusted_auth_proxies=["testclient"],
+            audit_db=audit_db or (tmp_path / "audit.db"),
+        ), users
+
+    def test_admin_page_and_user_management(self, root, tmp_dir, tmp_path, monkeypatch):
+        settings, users = self._settings(root, tmp_dir, tmp_path, monkeypatch)
+        admin_headers = {"X-Forwarded-User": "admin"}
+        alice_headers = {"X-Forwarded-User": "alice"}
+        with TestClient(create_app(settings)) as client:
+            page = client.get("/admin", headers={**admin_headers, **HTML})
+            assert page.status_code == 200
+            directory = client.get("/", headers={**admin_headers, **HTML})
+            assert directory.status_code == 200
+            assert bootstrap(directory)["admin"] is True
+            assert "admin-bootstrap" in page.text
+            assert "/static/assets/admin.js" in page.text
+
+            listed = client.get("/api/admin/users", headers=admin_headers)
+            assert listed.status_code == 200
+            assert {item["username"] for item in listed.json()["users"]} == {
+                "admin",
+                "alice",
+            }
+            assert set(listed.json()["users"][0]["permissions"]) == {
+                "read",
+                "write",
+                "delete",
+            }
+
+            created = client.post(
+                "/api/admin/users",
+                headers=admin_headers,
+                json={
+                    "username": "Bob",
+                    "permissions": {
+                        "read": True,
+                        "write": False,
+                        "delete": False,
+                    },
+                },
+            )
+            assert created.status_code == 200
+            assert created.json()["restart_required"] is True
+            assert "bob" in {item["username"] for item in created.json()["users"]}
+            assert yaml.safe_load((tmp_path / "ldapgate.yaml").read_text())["ldap"][
+                "allowed_users"
+            ] == ["admin", "alice", "bob"]
+
+            forbidden = client.get("/api/admin/users", headers=alice_headers)
+            assert forbidden.status_code == 403
+
+            deleted = client.delete("/api/admin/users/bob", headers=admin_headers)
+            assert deleted.status_code == 200
+            assert deleted.json()["restart_required"] is True
+            assert "bob" not in users.read_text()
+            assert (
+                "bob"
+                not in yaml.safe_load((tmp_path / "ldapgate.yaml").read_text())["ldap"][
+                    "allowed_users"
+                ]
+            )
+
+            deleted_admin = client.delete(
+                "/api/admin/users/admin", headers=admin_headers
+            )
+            assert deleted_admin.status_code == 200
+            assert "admin:" not in users.read_text()
+            assert yaml.safe_load((tmp_path / "ldapgate.yaml").read_text())["ldap"][
+                "allowed_users"
+            ] == ["admin", "alice"]
+
+            deleted_alice = client.delete(
+                "/api/admin/users/alice", headers=admin_headers
+            )
+            assert deleted_alice.status_code == 200
+            assert yaml.safe_load((tmp_path / "ldapgate.yaml").read_text())["ldap"][
+                "allowed_users"
+            ] == ["admin"]
+
+    def test_admin_requires_ldapgate_and_external_allowlist(
+        self, root, tmp_dir, users_yaml, tmp_path
+    ):
+        settings = Settings(
+            root_dir=root,
+            tmp_dir=tmp_dir,
+            require_auth=True,
+            users_config=users_yaml,
+            admin_users=["admin"],
+            trusted_auth_proxies=[],
+            audit_db=tmp_path / "audit.db",
+        )
+        with TestClient(create_app(settings)) as client:
+            response = client.get(
+                "/admin",
+                headers={"X-Forwarded-User": "admin", **HTML},
+            )
+        assert response.status_code == 403
+
+    def test_admin_accepts_trusted_ldapgate_proxy_identity(
+        self, root, tmp_dir, users_yaml, tmp_path
+    ):
+        settings = Settings(
+            root_dir=root,
+            tmp_dir=tmp_dir,
+            require_auth=True,
+            users_config=users_yaml,
+            admin_users=["admin"],
+            trusted_auth_proxies=["testclient"],
+            audit_db=tmp_path / "audit.db",
+        )
+        with TestClient(create_app(settings)) as client:
+            response = client.get(
+                "/admin",
+                headers={"X-Forwarded-User": "admin", **HTML},
+            )
+        assert response.status_code == 200
+
+    def test_admin_metrics_use_current_activity_window_and_purge_history(
+        self, root, tmp_dir, tmp_path, monkeypatch
+    ):
+        settings, _ = self._settings(root, tmp_dir, tmp_path, monkeypatch)
+        admin_headers = {"X-Forwarded-User": "admin"}
+        alice_headers = {"X-Forwarded-User": "alice"}
+        with TestClient(create_app(settings)) as client:
+            created = client.put("/recent.txt", content="recent", headers=alice_headers)
+            assert created.status_code == 204
+            with sqlite3.connect(settings.audit_db) as db:
+                db.execute(
+                    "UPDATE audit_events SET occurred_at = ? WHERE path = ?",
+                    ("2000-01-01T00:00:00+00:00", "/recent.txt"),
+                )
+                db.commit()
+            metrics = client.get("/api/admin/metrics", headers=admin_headers)
+            assert metrics.status_code == 200
+            assert metrics.json()["active_users"] == 0
+            assert "active_users_30d" not in metrics.json()
+
+            purged = client.delete(
+                "/api/admin/activity?older_than_days=1",
+                headers=admin_headers,
+            )
+            assert purged.status_code == 200
+            assert purged.json()["deleted"] == 1
+
+    def test_admin_can_restore_and_purge_persistent_trash(
+        self, root, tmp_dir, tmp_path, monkeypatch
+    ):
+        settings, _ = self._settings(root, tmp_dir, tmp_path, monkeypatch)
+        (root / "restore.txt").write_text("recover")
+        admin_headers = {"X-Forwarded-User": "admin"}
+        alice_headers = {"X-Forwarded-User": "alice"}
+        with TestClient(create_app(settings)) as client:
+            deleted = client.delete("/restore.txt", headers=alice_headers)
+            assert deleted.status_code == 200
+            transaction_id = deleted.json()["transaction_id"]
+            assert not (root / "restore.txt").exists()
+
+            trash = client.get("/api/admin/trash", headers=admin_headers)
+            assert trash.status_code == 200
+            assert trash.json()["transactions"][0]["transaction_id"] == transaction_id
+
+            restored = client.post(
+                f"/api/admin/trash/{transaction_id}/restore",
+                headers=admin_headers,
+            )
+            assert restored.status_code == 200
+            assert (root / "restore.txt").read_text() == "recover"
+
+            deleted_again = client.delete("/restore.txt", headers=alice_headers)
+            transaction_id = deleted_again.json()["transaction_id"]
+            purged = client.delete(
+                f"/api/admin/trash/{transaction_id}",
+                headers=admin_headers,
+            )
+            assert purged.status_code == 200
+            records = json.loads((root / ".xwing-trash" / ".index.json").read_text())
+            assert transaction_id not in {
+                record["transaction_id"] for record in records
+            }
+
+    def test_trash_index_survives_app_restart(
+        self, root, tmp_dir, tmp_path, monkeypatch
+    ):
+        settings, _ = self._settings(root, tmp_dir, tmp_path, monkeypatch)
+        (root / "restart.txt").write_text("persist")
+        headers = {"X-Forwarded-User": "alice"}
+        admin_headers = {"X-Forwarded-User": "admin"}
+        with TestClient(create_app(settings)) as client:
+            deleted = client.delete("/restart.txt", headers=headers)
+            transaction_id = deleted.json()["transaction_id"]
+
+        with TestClient(create_app(settings)) as client:
+            trash = client.get("/api/admin/trash", headers=admin_headers)
+            assert transaction_id in {
+                item["transaction_id"] for item in trash.json()["transactions"]
+            }
+            purged = client.delete(
+                f"/api/admin/trash/{transaction_id}",
+                headers=admin_headers,
+            )
+            assert purged.status_code == 200

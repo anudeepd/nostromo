@@ -43,7 +43,7 @@ class UserConfig:
         users:
           alice: rwd     # read + write + delete
           bob: rw        # read + write, no delete
-          "*": r         # fallback for any unlisted user
+          "*": r          # fallback for any unlisted user
 
     Verbose format:
         users:
@@ -57,8 +57,9 @@ class UserConfig:
         write  — defaults to false (omitting it denies write access)
         delete — defaults to false (omitting it denies delete access)
 
-    Compact format: only the characters 'r', 'w', 'd' are accepted.
-    Any other character raises ValueError at load time.
+    Compact format: only the characters 'r', 'w', and 'd' are accepted.
+    Any other character raises ValueError at load time. Administrator access
+    is configured separately with --admin-user or XWING_ADMIN_USERS.
     When a users config is present, unlisted users are denied unless the '*'
     wildcard is configured. Without a users config, anonymous/default users
     remain read-only for the no-auth local mode.
@@ -90,15 +91,27 @@ class UserConfig:
             if invalid:
                 raise ValueError(
                     f"Invalid permission string {v!r} for user {username!r}: "
-                    f"only 'r', 'w', 'd' are valid characters"
+                    "only 'r', 'w', 'd' are valid characters"
                 )
-            return UserPerms(read="r" in v, write="w" in v, delete="d" in v)
+            return UserPerms(
+                read="r" in v,
+                write="w" in v,
+                delete="d" in v,
+            )
+        if isinstance(v, dict) and "admin" in v:
+            raise ValueError(
+                "Administrator access is configured separately with --admin-user"
+            )
         if not isinstance(v, dict):
             raise ValueError(
                 f"Permissions for user {username!r} must be a string or mapping, got {type(v).__name__}"
             )
         perms = {}
-        for field, default in (("read", True), ("write", False), ("delete", False)):
+        for field, default in (
+            ("read", True),
+            ("write", False),
+            ("delete", False),
+        ):
             val = v.get(field, default)
             if not isinstance(val, bool):
                 raise ValueError(
@@ -144,6 +157,7 @@ class Settings(BaseModel):
     trusted_auth_proxies: list[str] = []
     users_config: Optional[Path] = None
     ldap_config: Optional[Path] = None
+    admin_users: list[str] = []
     audit_db: Optional[Path] = None
 
     _user_config: Optional[UserConfig] = PrivateAttr(default=None)
@@ -154,6 +168,13 @@ class Settings(BaseModel):
         # Keep path comparisons stable even when callers (including the CLI)
         # provide a relative serving root.
         self.root_dir = self.root_dir.expanduser().resolve()
+        if not self.admin_users and (
+            configured_admin_users := os.getenv("XWING_ADMIN_USERS")
+        ):
+            self.admin_users = configured_admin_users.split(",")
+        self.admin_users = sorted(
+            {user.strip().lower() for user in self.admin_users if user.strip()}
+        )
         if self.users_config is not None:
             self._user_config = UserConfig(self.users_config)
             self._config_mtime = self.users_config.stat().st_mtime
@@ -199,6 +220,9 @@ class Settings(BaseModel):
             if self._user_config is not None:
                 return self._user_config.get(user)
         return _DEFAULT_PERMS
+
+    def is_admin_user(self, user: str) -> bool:
+        return user.strip().lower() in self.admin_users
 
     def is_trusted_auth_proxy(self, client_ip: str) -> bool:
         return _ip_in_networks(client_ip, self.trusted_auth_proxies)

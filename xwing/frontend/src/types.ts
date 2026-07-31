@@ -21,6 +21,7 @@ export interface XwingBootstrapV1 {
   path: string;
   breadcrumbs: Breadcrumb[];
   user: { name: string; authenticated: boolean };
+  admin?: boolean;
   permissions: { read: boolean; write: boolean; delete: boolean };
   files: XwingFile[];
   upload: { chunkSize: number; parallelDefault: Parallelism };

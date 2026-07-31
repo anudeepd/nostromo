@@ -12,7 +12,11 @@ rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
 await build({
-  entryPoints: [resolve(srcDir, "app.tsx"), resolve(srcDir, "editor.tsx")],
+  entryPoints: [
+    resolve(srcDir, "app.tsx"),
+    resolve(srcDir, "editor.tsx"),
+    resolve(srcDir, "admin.ts"),
+  ],
   bundle: true,
   minify: true,
   format: "iife",
@@ -27,11 +31,12 @@ await build({
 });
 
 await build({
-  entryPoints: [resolve(srcDir, "style.css")],
+  entryPoints: [resolve(srcDir, "style.css"), resolve(srcDir, "admin.css")],
   bundle: true,
   minify: true,
   external: ["/static/fonts/*"],
-  outfile: resolve(outDir, "style.css"),
+  outdir: outDir,
+  entryNames: "[name]",
   assetNames: "fonts/[name]-[hash]",
   loader: { ".woff": "file", ".woff2": "file" },
   logLevel: "info",

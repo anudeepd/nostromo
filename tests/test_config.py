@@ -12,12 +12,31 @@ def test_audit_db_uses_environment_override(monkeypatch, tmp_path):
     assert settings.audit_db == audit_db
 
 
+def test_admin_users_are_loaded_separately_from_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("XWING_ADMIN_USERS", " Alice,OPS ")
+    settings = Settings(root_dir=tmp_path)
+    assert settings.admin_users == ["alice", "ops"]
+    assert settings.is_admin_user("ALICE")
+
+
 class TestUserConfigCompact:
     def test_rwd(self, tmp_path):
         f = tmp_path / "u.yaml"
         f.write_text("users:\n  alice: rwd\n")
         cfg = UserConfig(f)
         assert cfg.get("alice") == UserPerms(read=True, write=True, delete=True)
+
+    def test_admin_compact_permission_is_rejected(self, tmp_path):
+        f = tmp_path / "u.yaml"
+        f.write_text("users:\n  alice: rwda\n")
+        with pytest.raises(ValueError, match="only 'r', 'w', 'd'"):
+            UserConfig(f)
+
+    def test_admin_verbose_permission_is_rejected(self, tmp_path):
+        f = tmp_path / "u.yaml"
+        f.write_text("users:\n  alice:\n    read: true\n    admin: true\n")
+        with pytest.raises(ValueError, match="configured separately"):
+            UserConfig(f)
 
     def test_rw_no_delete(self, tmp_path):
         f = tmp_path / "u.yaml"

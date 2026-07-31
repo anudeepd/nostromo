@@ -85,6 +85,7 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
   const [lastSelected, setLastSelected] = useState<string | null>(null);
   const [sort, setSort] = useState<SortEntry[]>(() => readSort(initial.user.name));
   const [parallelOpen, setParallelOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -95,6 +96,7 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const parallelRef = useRef<HTMLDivElement>(null);
+  const accountRef = useRef<HTMLDivElement>(null);
   const requestId = useRef(0);
   const abort = useRef<AbortController | null>(null);
   const dragDepth = useRef(0);
@@ -109,11 +111,16 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
   const upload = useSyncExternalStore(uploadManager.subscribe, uploadManager.getSnapshot);
 
   useOutsideClose(parallelRef, () => setParallelOpen(false));
+  useOutsideClose(accountRef, () => setAccountOpen(false));
 
   useEffect(() => {
     const handleGlobalKey = (event: KeyboardEvent): void => {
       if (event.defaultPrevented || document.querySelector("[aria-modal='true']")) return;
-      if (event.key === "Escape" && parallelOpen) {
+      if (event.key === "Escape" && accountOpen) {
+        event.preventDefault();
+        setAccountOpen(false);
+        accountRef.current?.querySelector<HTMLElement>(".account-trigger")?.focus();
+      } else if (event.key === "Escape" && parallelOpen) {
         event.preventDefault();
         setParallelOpen(false);
         parallelRef.current?.querySelector<HTMLElement>(".parallel-trigger")?.focus();
@@ -130,7 +137,7 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
     };
     document.addEventListener("keydown", handleGlobalKey);
     return () => document.removeEventListener("keydown", handleGlobalKey);
-  }, [directory.permissions.delete, parallelOpen, selected]);
+  }, [accountOpen, directory.permissions.delete, parallelOpen, selected]);
 
   const addToast = (message: string, kind: Toast["kind"] = "success", action?: Toast["action"], duration = 5200): void => {
     const id = Date.now() + Math.random();
@@ -389,7 +396,15 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
     <a className="skip-link" href="#file-list">Skip to files</a>
     <header className="topbar">
       <div className="brand"><Logo/><span>X-wing</span><small className="brand-context">FILES</small></div>
-      {directory.user.authenticated ? <div className="account-inline"><span>{directory.user.name}</span><form id="logout-form" method="post" action="/_auth/logout" onSubmit={event => { event.preventDefault(); setAuthOverlay("signout"); const form = event.currentTarget; window.setTimeout(() => form.submit(), AUTH_REDIRECT_DELAY_MS); }}><button className="signout-button" type="submit">Sign out</button></form></div> : <span className="anonymous-label">anonymous</span>}
+      {directory.user.authenticated ? <div className="account-inline">{directory.admin ? <div className="account" ref={accountRef}>
+        <button className="account-trigger" type="button" aria-haspopup="menu" aria-expanded={accountOpen} onClick={() => setAccountOpen(value => !value)}>
+          <span>{directory.user.name}</span><Icon name="chevron"/>
+        </button>
+        {accountOpen && <div className="popover account-menu" role="menu" aria-label="Workspace navigation">
+          <a className="menu-item active" href="/" role="menuitem" aria-current="page"><span className="workspace-nav-dot" aria-hidden="true"/>Files</a>
+          <a className="menu-item" href="/admin" role="menuitem"><span className="workspace-nav-dot" aria-hidden="true"/>Admin panel</a>
+        </div>}
+      </div> : <span>{directory.user.name}</span>}<form id="logout-form" method="post" action="/_auth/logout" onSubmit={event => { event.preventDefault(); setAuthOverlay("signout"); const form = event.currentTarget; window.setTimeout(() => form.submit(), AUTH_REDIRECT_DELAY_MS); }}><button className="signout-button" type="submit">Sign out</button></form></div> : <span className="anonymous-label">anonymous</span>}
     </header>
 
     <main className={`workspace ${dragging ? "dragging" : ""} ${directoryState === "loading" ? "directory-loading" : ""}`}>

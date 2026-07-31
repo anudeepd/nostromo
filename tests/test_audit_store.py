@@ -24,6 +24,78 @@ def test_audit_store_records_filters_and_purges(tmp_path):
     assert audit_store.purge_events(db_path, 0) == 1
 
 
+def test_audit_store_activity_scopes(tmp_path):
+    db_path = tmp_path / "audit.db"
+    audit_store.init_db(db_path)
+    for method, path in (
+        ("PUT", "/notes.txt"),
+        ("admin_user_upsert", "/api/admin/users"),
+    ):
+        audit_store.record_event(
+            db_path=db_path,
+            username="admin",
+            method=method,
+            path=path,
+            details=None,
+            status_code=200,
+            duration_ms=1,
+        )
+
+    assert [
+        event["method"] for event in audit_store.list_events(db_path, scope="file")
+    ] == ["PUT"]
+    assert [
+        event["method"] for event in audit_store.list_events(db_path, scope="admin")
+    ] == ["admin_user_upsert"]
+    assert audit_store.summarize_events(db_path, scope="file")["event_count"] == 1
+    assert audit_store.summarize_events(db_path, scope="admin")["event_count"] == 1
+
+
+def test_static_assets_are_not_audited(root, tmp_dir, users_yaml, tmp_path):
+    db_path = tmp_path / "audit.db"
+    settings = Settings(
+        root_dir=root,
+        tmp_dir=tmp_dir,
+        users_config=users_yaml,
+        require_auth=True,
+        trusted_auth_proxies=["testclient"],
+        audit_db=db_path,
+    )
+    with TestClient(create_app(settings)) as client:
+        response = client.get(
+            "/static/assets/app.js",
+            headers={"X-Forwarded-User": "alice"},
+        )
+
+    assert response.status_code == 200
+    assert audit_store.list_events(db_path, username="alice") == []
+
+
+def test_directory_views_are_quiet_and_downloads_are_audited(
+    root, tmp_dir, users_yaml, tmp_path
+):
+    db_path = tmp_path / "audit.db"
+    (root / "download.txt").write_text("download me")
+    settings = Settings(
+        root_dir=root,
+        tmp_dir=tmp_dir,
+        users_config=users_yaml,
+        require_auth=True,
+        trusted_auth_proxies=["testclient"],
+        audit_db=db_path,
+    )
+    headers = {"X-Forwarded-User": "alice"}
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/", headers=headers).status_code == 200
+        assert audit_store.list_events(db_path, username="alice") == []
+        assert client.get("/download.txt", headers=headers).status_code == 200
+
+    events = audit_store.list_events(db_path, username="alice")
+    assert len(events) == 1
+    assert events[0]["method"] == "download"
+    assert events[0]["path"] == "/download.txt"
+
+
 def test_authenticated_text_write_is_audited_as_upload(
     root, tmp_dir, users_yaml, tmp_path
 ):

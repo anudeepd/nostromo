@@ -61,21 +61,44 @@ def record_event(
         )
 
 
-def list_events(
-    db_path: Path,
+_NOISE_METHODS = ("GET", "HEAD", "OPTIONS", "PROPFIND")
+
+
+def _append_activity_filters(
+    clauses: list[str],
+    values: list[object],
     *,
     username: str | None = None,
     since: str | None = None,
-    limit: int = 100,
-) -> list[dict]:
-    clauses: list[str] = []
-    values: list[object] = []
+    scope: str | None = None,
+) -> None:
+    clauses.append("method NOT IN (?, ?, ?, ?)")
+    values.extend(_NOISE_METHODS)
+    if scope == "file":
+        clauses.append("method NOT LIKE 'admin_%'")
+    elif scope == "admin":
+        clauses.append("method LIKE 'admin_%'")
     if username:
         clauses.append("username = ?")
         values.append(username)
     if since:
         clauses.append("occurred_at >= ?")
         values.append(since)
+
+
+def list_events(
+    db_path: Path,
+    *,
+    username: str | None = None,
+    since: str | None = None,
+    scope: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    clauses: list[str] = []
+    values: list[object] = []
+    _append_activity_filters(
+        clauses, values, username=username, since=since, scope=scope
+    )
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     with sqlite3.connect(db_path) as db:
         db.row_factory = sqlite3.Row
@@ -85,6 +108,33 @@ def list_events(
             (*values, limit),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def summarize_events(
+    db_path: Path,
+    *,
+    since: str | None = None,
+    scope: str | None = None,
+) -> dict:
+    clauses: list[str] = []
+    values: list[object] = []
+    _append_activity_filters(clauses, values, since=since, scope=scope)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    with sqlite3.connect(db_path) as db:
+        row = db.execute(
+            f"SELECT COUNT(*), COUNT(DISTINCT username) FROM audit_events{where}",
+            values,
+        ).fetchone()
+        users = db.execute(
+            "SELECT username, COUNT(*) AS event_count "
+            f"FROM audit_events{where} GROUP BY username ORDER BY event_count DESC, username",
+            values,
+        ).fetchall()
+    return {
+        "event_count": int(row[0] if row else 0),
+        "active_users": int(row[1] if row else 0),
+        "by_user": [{"username": user, "event_count": count} for user, count in users],
+    }
 
 
 def purge_events(db_path: Path, older_than_days: int) -> int:

@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
 import anyio
+import yaml
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,8 +23,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from .auth import get_user, require_perm
-from . import audit_store
-from .config import Settings
+from . import audit_store, trash_store
+from .config import Settings, UserConfig
 from .files import (
     human_size,
     is_editable,
@@ -71,6 +72,7 @@ APP_CSP = (
 )
 APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 DIRECTORY_MEDIA_TYPE = "application/vnd.xwing.directory+json"
+ACTIVE_USER_WINDOW_MINUTES = 5
 
 
 class BreadcrumbPayload(BaseModel):
@@ -87,6 +89,18 @@ class PermissionsPayload(BaseModel):
     read: bool
     write: bool
     delete: bool
+
+
+class AdminPermissionsPayload(BaseModel):
+    read: bool = True
+    write: bool = False
+    delete: bool = False
+
+
+class AdminUserPayload(BaseModel):
+    username: str
+    original_username: str | None = None
+    permissions: AdminPermissionsPayload
 
 
 class FilePayload(BaseModel):
@@ -108,6 +122,7 @@ class XwingBootstrapV1(BaseModel):
     path: str
     breadcrumbs: list[BreadcrumbPayload]
     user: UserPayload
+    admin: bool = False
     permissions: PermissionsPayload
     files: list[FilePayload]
     upload: UploadPayload
@@ -189,14 +204,19 @@ def create_app(settings: Settings) -> FastAPI:
     async def lifespan(app: FastAPI):
         if settings.audit_db:
             audit_store.init_db(settings.audit_db)
+        delete_transactions.update(
+            trash_store.load_transactions(
+                settings.root_dir / ".xwing-trash",
+                settings.root_dir,
+            )
+        )
         task = asyncio.create_task(cleanup_stale_sessions(settings))
         yield
         task.cancel()
 
     app = FastAPI(lifespan=lifespan)
-    # In-memory undo transactions — lost on server restart. This is intentional:
-    # the 15s undo window is short enough that restart-induced loss is acceptable,
-    # and persisting trash transactions would require a DB migration for marginal gain.
+    # Trash metadata survives restarts so administrators can inspect and restore
+    # deleted items beyond the short browser undo window.
     delete_transactions: dict[str, dict] = {}
 
     def _skip_generic_audit(request: Request) -> bool:
@@ -204,11 +224,27 @@ def create_app(settings: Settings) -> FastAPI:
             return True
         if request.url.path.startswith("/_upload/"):
             return True
+        if request.url.path.startswith("/static/"):
+            return True
+        if request.url.path.startswith("/api/admin/"):
+            return True
+        if request.url.path == "/admin":
+            return True
         if request.url.path == "/_bulk/delete":
             return True
         if request.url.path.startswith("/api/restore/"):
             return True
-        return request.method.upper() in {"PUT", "DELETE", "MKCOL", "COPY", "MOVE"}
+        return request.method.upper() in {
+            "GET",
+            "HEAD",
+            "OPTIONS",
+            "PROPFIND",
+            "PUT",
+            "DELETE",
+            "MKCOL",
+            "COPY",
+            "MOVE",
+        }
 
     async def _record_semantic_audit(
         *,
@@ -521,21 +557,40 @@ def create_app(settings: Settings) -> FastAPI:
                     status_code=403, detail="Cannot delete internal paths"
                 )
         items = []
-        for index, fspath in enumerate(paths_to_delete):
-            trash_path = trash_dir / _trash_name(fspath, txid, index)
-            await anyio.to_thread.run_sync(shutil.move, str(fspath), str(trash_path))
-            items.append(
-                {
-                    "original": fspath,
-                    "trash": trash_path,
-                    "kind": "directory" if trash_path.is_dir() else "file",
-                }
+        try:
+            for index, fspath in enumerate(paths_to_delete):
+                trash_path = trash_dir / _trash_name(fspath, txid, index)
+                await anyio.to_thread.run_sync(
+                    shutil.move, str(fspath), str(trash_path)
+                )
+                items.append(
+                    {
+                        "original": fspath,
+                        "trash": trash_path,
+                        "kind": "directory" if trash_path.is_dir() else "file",
+                    }
+                )
+            delete_transactions[txid] = {
+                "user": user,
+                "created": time.time(),
+                "items": items,
+            }
+            await anyio.to_thread.run_sync(
+                trash_store.save_transactions,
+                trash_dir,
+                settings.root_dir,
+                delete_transactions,
             )
-        delete_transactions[txid] = {
-            "user": user,
-            "created": time.time(),
-            "items": items,
-        }
+        except BaseException:
+            delete_transactions.pop(txid, None)
+            for item in reversed(items):
+                trash_path = item["trash"]
+                original_path = item["original"]
+                if trash_path.exists() and not original_path.exists():
+                    await anyio.to_thread.run_sync(
+                        shutil.move, str(trash_path), str(original_path)
+                    )
+            raise
         return {"transaction_id": txid, "count": len(items), "items": items}
 
     # ── Method handlers ───────────────────────────────────────────────────────
@@ -659,7 +714,17 @@ def create_app(settings: Settings) -> FastAPI:
         if "edit" in request.query_params and is_editable(fspath):
             return await _handle_edit(fspath, request, user)
 
-        return FileResponse(fspath)
+        response = FileResponse(fspath)
+        if request.method.upper() == "GET":
+            await _record_semantic_audit(
+                user=user,
+                operation="download",
+                path=_to_rel_path(fspath),
+                details=None,
+                status_code=response.status_code,
+                started=time.monotonic(),
+            )
+        return response
 
     async def _handle_get_dir(fspath: Path, request: Request, user: str) -> Response:
         rel_path = _to_rel_path(fspath)
@@ -705,8 +770,11 @@ def create_app(settings: Settings) -> FastAPI:
                 for crumb in breadcrumbs
             ],
             user=UserPayload(name=user, authenticated=user != "anonymous"),
+            admin=settings.is_admin_user(user),
             permissions=PermissionsPayload(
-                read=perms.read, write=perms.write, delete=perms.delete
+                read=perms.read,
+                write=perms.write,
+                delete=perms.delete,
             ),
             files=[
                 FilePayload(
@@ -1037,6 +1105,12 @@ def create_app(settings: Settings) -> FastAPI:
             restored_paths.append(_to_rel_path(target))
 
         delete_transactions.pop(transaction_id, None)
+        await anyio.to_thread.run_sync(
+            trash_store.save_transactions,
+            _trash_dir(),
+            settings.root_dir,
+            delete_transactions,
+        )
         response = JSONResponse(
             {"ok": True, "restored": restored, "paths": restored_paths}
         )
@@ -1052,6 +1126,532 @@ def create_app(settings: Settings) -> FastAPI:
             started=started,
         )
         return response
+
+    def _admin_user(request: Request) -> str:
+        if _ldap_config_path is None and not settings.trusted_auth_proxies:
+            raise HTTPException(
+                status_code=403,
+                detail="Admin console requires LDAPGate authentication",
+            )
+        user = getattr(request.state, "user", None)
+        if not user:
+            user = get_user(request, settings)
+        if not user or str(user).lower() == "anonymous":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin console requires an authenticated LDAPGate user",
+            )
+        user = str(user).lower()
+        if not settings.is_admin_user(user):
+            raise HTTPException(status_code=403, detail="Administrator access denied")
+        return user
+
+    def _read_users_document() -> tuple[Path, dict, dict]:
+        path = settings.users_config
+        if path is None:
+            raise HTTPException(
+                status_code=409,
+                detail="User management requires --users-config",
+            )
+        try:
+            document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404, detail="Users config not found"
+            ) from None
+        except (OSError, yaml.YAMLError) as exc:
+            raise HTTPException(
+                status_code=500, detail=f"Could not read users config: {exc}"
+            ) from None
+        if not isinstance(document, dict) or not isinstance(
+            document.get("users"), dict
+        ):
+            raise HTTPException(
+                status_code=500, detail="Users config has invalid structure"
+            )
+        return path, document, document["users"]
+
+    def _normalize_username(value: str) -> str:
+        username = value.strip().lower()
+        if (
+            not username
+            or username == "*"
+            or len(username) > 128
+            or any(ord(char) < 32 or ord(char) == 127 for char in username)
+            or "/" in username
+        ):
+            raise HTTPException(status_code=400, detail="Invalid username")
+        return username
+
+    def _permissions_dict(value: str | dict) -> dict[str, bool]:
+        try:
+            perms = UserConfig._parse("user", value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {
+            "read": perms.read,
+            "write": perms.write,
+            "delete": perms.delete,
+        }
+
+    def _users_payload(entries: dict) -> dict:
+        users = []
+        default = None
+        for username, value in sorted(
+            entries.items(), key=lambda pair: str(pair[0]).lower()
+        ):
+            if str(username) == "*":
+                default = _permissions_dict(value)
+                continue
+            users.append(
+                {
+                    "username": str(username).lower(),
+                    "permissions": _permissions_dict(value),
+                }
+            )
+        return {"users": users, "default": default}
+
+    def _write_yaml_document(path: Path, document: dict) -> None:
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_text(
+                yaml.safe_dump(document, sort_keys=False),
+                encoding="utf-8",
+            )
+            temporary.chmod(0o600)
+            temporary.replace(path)
+        finally:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+
+    def _prepare_ldap_user_document(entries: dict) -> tuple[Path, dict] | None:
+        if _ldap_config_path is None:
+            return None
+        path, document = _read_ldap_document()
+        section = document.get("ldap")
+        if not isinstance(section, dict):
+            raise HTTPException(
+                status_code=500, detail="LDAPGate config has invalid ldap section"
+            )
+        usernames = sorted(
+            {
+                *(
+                    str(username).strip().lower()
+                    for username in entries
+                    if str(username) != "*"
+                ),
+                *(user.strip().lower() for user in settings.admin_users),
+            }
+        )
+        if (
+            not usernames
+            and bool(section.get("require_authorization_rule", True))
+            and not section.get("group_dn")
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="At least one LDAP user must remain while LDAP authorization is enabled",
+            )
+        section["allowed_users"] = usernames
+        _validate_ldap_document(path, document)
+        return path, document
+
+    def _save_user_documents(
+        users_path: Path,
+        users_document: dict,
+        ldap_update: tuple[Path, dict] | None,
+    ) -> None:
+        try:
+            original_users = users_path.read_bytes()
+            _write_yaml_document(users_path, users_document)
+            try:
+                if ldap_update is not None:
+                    _write_yaml_document(*ldap_update)
+            except Exception:
+                users_path.write_bytes(original_users)
+                raise
+            settings._user_config = UserConfig(users_path)
+            settings._config_mtime = users_path.stat().st_mtime
+        except HTTPException:
+            raise
+        except (OSError, yaml.YAMLError, ValueError) as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Could not save users and LDAP config: {exc}",
+            ) from None
+
+    async def _record_admin_event(
+        user: str,
+        operation: str,
+        path: str,
+        details: dict | None = None,
+    ) -> None:
+        await _record_semantic_audit(
+            user=user,
+            operation=operation,
+            path=path,
+            details=json.dumps(details, ensure_ascii=False) if details else None,
+            status_code=200,
+            started=time.monotonic(),
+        )
+
+    @app.get("/admin", include_in_schema=False)
+    async def admin_page(request: Request):
+        user = _admin_user(request)
+        return templates.TemplateResponse(
+            request,
+            "admin.html",
+            {
+                "user": user,
+                "ldap_configured": _ldap_config_path is not None,
+                "auth_idle_timeout": ldap_idle_timeout,
+            },
+        )
+
+    @app.get("/api/admin/users", include_in_schema=False)
+    async def admin_users(request: Request):
+        _admin_user(request)
+        _, _, entries = _read_users_document()
+        return _users_payload(entries)
+
+    @app.post("/api/admin/users", include_in_schema=False)
+    async def admin_upsert_user(payload: AdminUserPayload, request: Request):
+        actor = _admin_user(request)
+        path, document, entries = _read_users_document()
+        username = _normalize_username(payload.username)
+        original_username = (
+            _normalize_username(payload.original_username)
+            if payload.original_username
+            else username
+        )
+        for existing in list(entries):
+            if str(existing).lower() in {username, original_username}:
+                del entries[existing]
+        entries[username] = payload.permissions.model_dump()
+        ldap_update = _prepare_ldap_user_document(entries)
+        _save_user_documents(path, document, ldap_update)
+        await _record_admin_event(
+            actor,
+            "admin_user_upsert",
+            "/api/admin/users",
+            {
+                "username": username,
+                "permissions": payload.permissions.model_dump(),
+                "ldap_synced": ldap_update is not None,
+            },
+        )
+        return {
+            "ok": True,
+            "restart_required": ldap_update is not None,
+            **_users_payload(entries),
+        }
+
+    @app.delete("/api/admin/users/{username}", include_in_schema=False)
+    async def admin_delete_user(username: str, request: Request):
+        actor = _admin_user(request)
+        path, document, entries = _read_users_document()
+        username = _normalize_username(username)
+        matching = next((key for key in entries if str(key).lower() == username), None)
+        if matching is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        del entries[matching]
+        ldap_update = _prepare_ldap_user_document(entries)
+        _save_user_documents(path, document, ldap_update)
+        await _record_admin_event(
+            actor,
+            "admin_user_delete",
+            f"/api/admin/users/{username}",
+            {"username": username, "ldap_synced": ldap_update is not None},
+        )
+        return {
+            "ok": True,
+            "restart_required": ldap_update is not None,
+            **_users_payload(entries),
+        }
+
+    def _ldap_file() -> Path:
+        if _ldap_config_path is None:
+            raise HTTPException(
+                status_code=404, detail="LDAPGate config is not configured"
+            )
+        if not _ldap_config_path.exists():
+            raise HTTPException(status_code=404, detail="LDAPGate config not found")
+        return _ldap_config_path
+
+    def _read_ldap_document() -> tuple[Path, dict]:
+        path = _ldap_file()
+        try:
+            document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            raise HTTPException(
+                status_code=500, detail=f"Could not read LDAPGate config: {exc}"
+            ) from None
+        if not isinstance(document, dict):
+            raise HTTPException(
+                status_code=500, detail="LDAPGate config has invalid structure"
+            )
+        return path, document
+
+    def _validate_ldap_document(path: Path, document: dict) -> None:
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_text(
+                yaml.safe_dump(document, sort_keys=False), encoding="utf-8"
+            )
+            temporary.chmod(0o600)
+            try:
+                from ldapgate.config import load_config  # type: ignore[import]
+            except ImportError:
+                raise HTTPException(
+                    status_code=503,
+                    detail="ldapgate is required to validate LDAPGate config",
+                ) from None
+            load_config(temporary)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid LDAPGate configuration: {exc}",
+            ) from None
+        finally:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+
+    def _path_size(path: Path) -> int:
+        try:
+            if path.is_file() and not path.is_symlink():
+                return path.stat().st_size
+            if path.is_dir() and not path.is_symlink():
+                return sum(
+                    child.stat().st_size
+                    for child in path.rglob("*")
+                    if child.is_file() and not child.is_symlink()
+                )
+        except OSError:
+            return 0
+        return 0
+
+    def _trash_payload() -> dict:
+        transactions = []
+        for transaction_id, transaction in sorted(
+            delete_transactions.items(),
+            key=lambda pair: pair[1].get("created", 0),
+            reverse=True,
+        ):
+            items = []
+            for item in transaction["items"]:
+                trash_path: Path = item["trash"]
+                if not trash_path.exists():
+                    continue
+                items.append(
+                    {
+                        "path": _to_rel_path(item["original"]),
+                        "kind": item["kind"],
+                        "size": _path_size(trash_path),
+                    }
+                )
+            if items:
+                transactions.append(
+                    {
+                        "transaction_id": transaction_id,
+                        "user": transaction["user"],
+                        "created": datetime.fromtimestamp(
+                            transaction["created"], tz=timezone.utc
+                        ).isoformat(),
+                        "items": items,
+                        "size": sum(item["size"] for item in items),
+                    }
+                )
+        return {
+            "transactions": transactions,
+            "count": sum(len(item["items"]) for item in transactions),
+            "size": sum(item["size"] for item in transactions),
+        }
+
+    @app.get("/api/admin/trash", include_in_schema=False)
+    async def admin_trash(request: Request):
+        _admin_user(request)
+        return await anyio.to_thread.run_sync(_trash_payload)
+
+    @app.post("/api/admin/trash/{transaction_id}/restore", include_in_schema=False)
+    async def admin_restore_trash(transaction_id: str, request: Request):
+        actor = _admin_user(request)
+        transaction = delete_transactions.get(transaction_id)
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Trash transaction not found")
+        restored_paths = []
+        for item in transaction["items"]:
+            trash_path: Path = item["trash"]
+            original_path: Path = item["original"]
+            if not trash_path.exists():
+                continue
+            target = _restore_candidate(original_path, item["kind"])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            await anyio.to_thread.run_sync(shutil.move, str(trash_path), str(target))
+            restored_paths.append(_to_rel_path(target))
+        delete_transactions.pop(transaction_id, None)
+        await anyio.to_thread.run_sync(
+            trash_store.save_transactions,
+            _trash_dir(),
+            settings.root_dir,
+            delete_transactions,
+        )
+        await _record_admin_event(
+            actor,
+            "admin_trash_restore",
+            f"/api/admin/trash/{transaction_id}/restore",
+            {"restored": len(restored_paths), "paths": restored_paths},
+        )
+        return {"ok": True, "restored": len(restored_paths), "paths": restored_paths}
+
+    @app.delete("/api/admin/trash/{transaction_id}", include_in_schema=False)
+    async def admin_delete_trash(transaction_id: str, request: Request):
+        actor = _admin_user(request)
+        transaction = delete_transactions.get(transaction_id)
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Trash transaction not found")
+        deleted = 0
+        for item in transaction["items"]:
+            trash_path: Path = item["trash"]
+            if not trash_path.exists():
+                continue
+            if trash_path.is_dir():
+                await anyio.to_thread.run_sync(shutil.rmtree, trash_path)
+            else:
+                await anyio.to_thread.run_sync(trash_path.unlink)
+            deleted += 1
+        delete_transactions.pop(transaction_id, None)
+        await anyio.to_thread.run_sync(
+            trash_store.save_transactions,
+            _trash_dir(),
+            settings.root_dir,
+            delete_transactions,
+        )
+        await _record_admin_event(
+            actor,
+            "admin_trash_delete",
+            f"/api/admin/trash/{transaction_id}",
+            {"deleted": deleted},
+        )
+        return {"ok": True, "deleted": deleted}
+
+    def _storage_metrics() -> dict[str, int]:
+        files = 0
+        bytes_used = 0
+        for path in settings.root_dir.rglob("*"):
+            if (
+                path.is_file()
+                and not path.is_symlink()
+                and not _is_internal_path(path)
+                and not _is_ignored_system_path(path)
+                and not _is_sensitive_path(path)
+            ):
+                try:
+                    bytes_used += path.stat().st_size
+                    files += 1
+                except OSError:
+                    continue
+        return {"files": files, "bytes": bytes_used}
+
+    async def _admin_metrics() -> dict:
+        _, _, entries = _read_users_document()
+        since = datetime.fromtimestamp(
+            time.time() - ACTIVE_USER_WINDOW_MINUTES * 60, tz=timezone.utc
+        ).isoformat()
+        if settings.audit_db and settings.audit_db.exists():
+            summary = await anyio.to_thread.run_sync(
+                lambda: audit_store.summarize_events(settings.audit_db, since=since)
+            )
+        else:
+            summary = {"event_count": 0, "active_users": 0, "by_user": []}
+        storage = await anyio.to_thread.run_sync(_storage_metrics)
+        trash = await anyio.to_thread.run_sync(_trash_payload)
+        return {
+            "configured_users": len([key for key in entries if str(key) != "*"]),
+            "active_users": summary["active_users"],
+            "activity_events": summary["event_count"],
+            "active_window_minutes": ACTIVE_USER_WINDOW_MINUTES,
+            "storage": storage,
+            "trash": {"items": trash["count"], "bytes": trash["size"]},
+        }
+
+    @app.get("/api/admin/metrics", include_in_schema=False)
+    async def admin_metrics(request: Request):
+        _admin_user(request)
+        return await _admin_metrics()
+
+    @app.get("/api/admin/activity", include_in_schema=False)
+    async def admin_activity(request: Request):
+        _admin_user(request)
+        username = request.query_params.get("username") or None
+        since = request.query_params.get("since") or None
+        scope = request.query_params.get("scope", "file")
+        if scope not in {"all", "file", "admin"}:
+            raise HTTPException(
+                status_code=400, detail="scope must be all, file, or admin"
+            )
+        try:
+            limit = min(max(int(request.query_params.get("limit", "200")), 1), 1000)
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="limit must be an integer"
+            ) from None
+        if not settings.audit_db or not settings.audit_db.exists():
+            return {
+                "events": [],
+                "summary": {"event_count": 0, "active_users": 0, "by_user": []},
+            }
+        events = await anyio.to_thread.run_sync(
+            lambda: audit_store.list_events(
+                settings.audit_db,
+                username=username,
+                since=since,
+                scope=scope,
+                limit=limit,
+            )
+        )
+        summary = await anyio.to_thread.run_sync(
+            lambda: audit_store.summarize_events(
+                settings.audit_db,
+                since=since,
+                scope=scope,
+            )
+        )
+        return {"events": events, "summary": summary}
+
+    @app.delete("/api/admin/activity", include_in_schema=False)
+    async def admin_purge_activity(request: Request):
+        actor = _admin_user(request)
+        try:
+            older_than_days = int(request.query_params.get("older_than_days", "90"))
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="older_than_days must be an integer"
+            ) from None
+        if not 1 <= older_than_days <= 36500:
+            raise HTTPException(
+                status_code=400,
+                detail="older_than_days must be between 1 and 36500",
+            )
+        deleted = 0
+        if settings.audit_db and settings.audit_db.exists():
+            deleted = await anyio.to_thread.run_sync(
+                audit_store.purge_events,
+                settings.audit_db,
+                older_than_days,
+            )
+        await _record_admin_event(
+            actor,
+            "admin_audit_purge",
+            "/api/admin/activity",
+            {"older_than_days": older_than_days, "deleted": deleted},
+        )
+        return {"ok": True, "deleted": deleted, "older_than_days": older_than_days}
 
     # ── Catch-all route ───────────────────────────────────────────────────────
 

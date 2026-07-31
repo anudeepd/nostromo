@@ -96,10 +96,15 @@ def _configure_logging(log_file: Path | None) -> None:
     help="Path to YAML file with per-user read/write/delete permissions. "
     "Unlisted users are denied unless '*' is configured.",
 )
-# Deprecated in 0.2.2 — replaced by --users-config
+@click.option(
+    "--admin-user",
+    "admin_users",
+    multiple=True,
+    help="LDAP username allowed to use admin console. Repeat for multiple users.",
+)
+@click.option("--admin-users", "legacy_admin_users", default=None, hidden=True)
 @click.option("--read-users", default=None, hidden=True)
 @click.option("--write-users", default=None, hidden=True)
-@click.option("--admin-users", default=None, hidden=True)
 @click.option(
     "--user-header",
     default=None,
@@ -135,6 +140,7 @@ def serve(
     users_config,
     read_users,
     write_users,
+    legacy_admin_users,
     admin_users,
     user_header,
     trusted_auth_proxies,
@@ -147,12 +153,14 @@ def serve(
     for flag, val in (
         ("--read-users", read_users),
         ("--write-users", write_users),
-        ("--admin-users", admin_users),
+        ("--admin-users", legacy_admin_users),
     ):
         if val is not None:
+            replacement = (
+                "--admin-user" if flag == "--admin-users" else "--users-config"
+            )
             raise click.UsageError(
-                f"{flag} was removed in 0.2.2. "
-                "Use --users-config with a YAML file instead."
+                f"{flag} was removed in 0.2.2. Use {replacement} instead."
             )
     _configure_logging(log_file)
 
@@ -206,6 +214,8 @@ def serve(
         kwargs["users_config"] = users_config
     if ldap_config is not None:
         kwargs["ldap_config"] = ldap_config
+    if admin_users:
+        kwargs["admin_users"] = list(admin_users)
     if audit_db is not None:
         kwargs["audit_db"] = audit_db
 
@@ -226,6 +236,8 @@ def serve(
             os.environ["XWING_USERS_CONFIG"] = users_config
         if user_header:
             os.environ["XWING_USER_HEADER"] = user_header
+        if admin_users:
+            os.environ["XWING_ADMIN_USERS"] = ",".join(admin_users)
         if trusted_auth_proxies:
             os.environ["XWING_TRUSTED_AUTH_PROXIES"] = ",".join(trusted_auth_proxies)
         if ldap_config is not None:
