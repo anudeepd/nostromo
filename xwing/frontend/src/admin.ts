@@ -226,6 +226,14 @@ function metricCard(label: string, value: string, hint: string): string {
   return `<article class="metric-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(hint)}</small></article>`;
 }
 
+function loadActiveTab(): void {
+  if (activeTab === "overview") void loadMetrics();
+  if (activeTab === "users") void loadUsers();
+  if (activeTab === "activity") void loadActivity();
+  if (activeTab === "trash") void loadTrash();
+}
+
+
 function render(): void {
   const tabs = [
     { id: "overview", label: "Overview" },
@@ -243,18 +251,25 @@ function render(): void {
   suppressViewAnimation = false;
   root.querySelectorAll<HTMLElement>("[data-admin-tab]").forEach(link => link.addEventListener("click", event => {
     event.preventDefault();
-    activeTab = link.dataset.adminTab || "overview";
-    history.replaceState(null, "", `#${activeTab}`);
+    const nextTab = link.dataset.adminTab || "overview";
+    if (nextTab === activeTab) return;
+    activeTab = nextTab;
+    history.pushState(null, "", `#${activeTab}`);
     render();
-    if (activeTab === "overview") void loadMetrics();
-    if (activeTab === "users") void loadUsers();
-    if (activeTab === "activity") void loadActivity();
-    if (activeTab === "trash") void loadTrash();
+    loadActiveTab();
   }));
   bindView();
   bindAccountMenu();
   authSession.wireLogoutForm();
 }
+
+window.addEventListener("popstate", () => {
+  const nextTab = location.hash.slice(1);
+  if (!tabNames.includes(nextTab) || nextTab === activeTab) return;
+  activeTab = nextTab;
+  render();
+  loadActiveTab();
+});
 
 function bindAccountMenu(): void {
   const control = document.getElementById("account-control");
