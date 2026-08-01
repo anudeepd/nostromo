@@ -114,8 +114,9 @@ td strong { color: var(--admin-text); font-weight: 500; }
 .unit-label { display: inline-flex; align-items: center; color: var(--admin-faint); font: 11px "IBM Plex Mono", monospace; white-space: nowrap; }
 .inline-form input { width: auto; min-width: 150px; height: 36px; }
 .inline-form select { height: 36px; min-height: 36px; }
+.activity-filter-form select { -webkit-appearance: none; appearance: none; padding-right: 32px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m7 10 5 5 5-5' fill='none' stroke='%239ca7ba' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-position: right 12px center; background-repeat: no-repeat; background-size: 14px; }
 .activity-tools .inline-form input,
-.activity-tools .inline-form select { padding: 0 11px; font: 12px/1.4 "IBM Plex Mono", monospace; }
+.activity-tools .inline-form select { padding: 0 32px 0 11px; font: 12px/1.4 "IBM Plex Mono", monospace; }
 .inline-form label { display: block; }
 .trash-help { margin: 0 0 16px !important; }
 .activity-table td { max-width: none; }

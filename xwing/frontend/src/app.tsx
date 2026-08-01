@@ -29,6 +29,7 @@ const AUTH_REDIRECT_DELAY_MS = 1500;
 const SORT_STORAGE_VERSION = "v2";
 const DRAG_OVERLAY_STALE_MS = 1500;
 const DROP_DELAYED_MS = 15000;
+const DELETE_KEYS: Record<string, true> = { Delete: true, Backspace: true };
 
 function sortStorageKey(user: string): string {
   return `xwing.sort.${SORT_STORAGE_VERSION}.${user}`;
@@ -128,7 +129,7 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
         event.preventDefault();
         setSelected(new Set());
         setLastSelected(null);
-      } else if (event.key === "Delete" && selected.size && directory.permissions.delete && !parallelOpen) {
+      } else if (DELETE_KEYS[event.key] && selected.size && directory.permissions.delete && !parallelOpen) {
         const target = event.target instanceof HTMLElement ? event.target : null;
         if (target?.matches("input, textarea, select") || target?.isContentEditable) return;
         event.preventDefault();
@@ -449,7 +450,7 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
 
       <section className="file-surface" aria-label="Files and folders" aria-busy={directoryState === "loading"} onKeyDown={event => {
         if ((event.target as Element).closest(".file-row")) return;
-        if (event.key === "Delete" && directory.permissions.delete && selected.size) { event.preventDefault(); setDialog({ kind: "delete", paths: [...selected], pending: false }); }
+        if (DELETE_KEYS[event.key] && directory.permissions.delete && selected.size) { event.preventDefault(); setDialog({ kind: "delete", paths: [...selected], pending: false }); }
         else if (event.key === "Escape" && selected.size) { event.preventDefault(); setSelected(new Set()); setLastSelected(null); }
       }}>
         <div className="table-head"><SelectionCheckbox label={selected.size === files.length ? "Deselect all" : "Select all"} checked={files.length > 0 && selected.size === files.length} indeterminate={selected.size > 0 && selected.size < files.length} onToggle={() => { setSelected(selected.size === files.length ? new Set() : new Set(files.map(file => file.path))); setLastSelected(null); }}/><span/>{(["name", "size", "modified"] as SortKey[]).map(key => { const index = sort.findIndex(entry => entry.key === key); const entry = sort[index]; const label = key === "modified" ? "Modified" : key[0]!.toUpperCase() + key.slice(1); return <button key={key} className={`sort ${key === "modified" ? "date" : ""} ${entry ? "active" : ""}`} aria-label={`${label}, ${entry ? `${entry.direction === "asc" ? "ascending" : "descending"}, priority ${index + 1}` : "not sorted"}`} onClick={() => updateSort(key)}>{label} {entry && <span>{entry.direction === "asc" ? "▲" : "▼"}{sort.length > 1 ? index + 1 : ""}</span>}</button>; })}<span/></div>

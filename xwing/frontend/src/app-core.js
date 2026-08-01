@@ -1,3 +1,5 @@
+const DELETE_KEYS = { Delete: true, Backspace: true };
+
 export function createDialogController({ documentRef = document } = {}) {
   let activeResolve = null;
   let savedFocus = null;
@@ -354,7 +356,7 @@ export function wireFileTableSelection({
     const target = event.target instanceof Element ? event.target : event.target.parentElement;
     const row = target?.closest(".selectable-entry");
     if (!row) {
-      if (event.key === "Delete" && canDelete && selectedPaths.size && onDeleteSelected) {
+      if (DELETE_KEYS[event.key] && canDelete && selectedPaths.size && onDeleteSelected) {
         event.preventDefault();
         onDeleteSelected();
       } else if (event.key === "Escape") {
@@ -369,7 +371,7 @@ export function wireFileTableSelection({
       event.preventDefault();
       const link = primaryLink(row);
       if (link) onOpen?.(link);
-    } else if (event.key === "Delete" && canDelete) {
+    } else if (DELETE_KEYS[event.key] && canDelete) {
       event.preventDefault();
       if (selectedPaths.size && onDeleteSelected) onDeleteSelected();
       else onDelete?.(row);

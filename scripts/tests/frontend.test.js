@@ -390,6 +390,27 @@ describe("delegated file table selection", () => {
     expect(deleteRow).not.toHaveBeenCalled();
   });
 
+  it("deletes the full selection when Backspace is pressed in selection mode", () => {
+    const deleteSelection = vi.fn();
+    const controller = wireFileTableSelection({
+      documentRef: document,
+      table: document.querySelector(".file-table"),
+      selectAll: document.getElementById("select-all"),
+      zipSelectedBtn: document.getElementById("zip-selected-btn"),
+      deleteSelectedBtn: document.getElementById("delete-selected-btn"),
+      canDelete: true,
+      onDeleteSelected: deleteSelection,
+    });
+    const rows = document.querySelectorAll(".selectable-entry");
+
+    rows[0].dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    rows[1].dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    rows[0].dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
+
+    expect(controller.selectedPaths.size).toBe(2);
+    expect(deleteSelection).toHaveBeenCalledOnce();
+  });
+
   it("deletes the full selection when Delete is pressed on select-all", () => {
     const deleteSelection = vi.fn();
     const controller = wireFileTableSelection({
