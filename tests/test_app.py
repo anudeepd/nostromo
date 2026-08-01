@@ -338,9 +338,11 @@ class TestAuth:
         assert ".submit-label { min-width: 4.75rem; }" in template
         assert "appearance: none;" not in template
         assert "-webkit-appearance: none;" not in template
-        assert ".password-field" not in template
-        assert "padding-right: 2.75rem;" not in template
-        assert 'class="password-toggle"' not in template
+        assert ".password-field" in template
+        assert "padding-inline-end: 3rem;" in template
+        assert 'class="password-toggle"' in template
+        assert "password.type = showing ? 'text' : 'password';" in template
+        assert "password.focus();" in template
         assert "::-ms-reveal" not in template
         assert "::-moz-reveal" not in template
         assert 'style="' not in template
