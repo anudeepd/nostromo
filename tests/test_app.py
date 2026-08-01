@@ -1660,6 +1660,57 @@ class TestAdminConsole:
                 record["transaction_id"] for record in records
             }
 
+    def test_admin_can_restore_selected_or_empty_trash(
+        self, root, tmp_dir, tmp_path, monkeypatch
+    ):
+        settings, _ = self._settings(root, tmp_dir, tmp_path, monkeypatch)
+        for name in ("first.txt", "second.txt", "third.txt"):
+            (root / name).write_text(name)
+        admin_headers = {"X-Forwarded-User": "admin"}
+        alice_headers = {"X-Forwarded-User": "alice"}
+        with TestClient(create_app(settings)) as client:
+            transaction_ids = []
+            for name in ("first.txt", "second.txt", "third.txt"):
+                deleted = client.delete(f"/{name}", headers=alice_headers)
+                assert deleted.status_code == 200
+                transaction_ids.append(deleted.json()["transaction_id"])
+
+            restored = client.post(
+                "/api/admin/trash/restore",
+                json={"transaction_ids": transaction_ids[:2]},
+                headers=admin_headers,
+            )
+            assert restored.status_code == 200
+            assert restored.json()["restored"] == 2
+            assert set(restored.json()["paths"]) == {"/first.txt", "/second.txt"}
+            assert (root / "first.txt").read_text() == "first.txt"
+            assert (root / "second.txt").read_text() == "second.txt"
+            assert not (root / "third.txt").exists()
+            remaining = client.get("/api/admin/trash", headers=admin_headers).json()[
+                "transactions"
+            ]
+            assert [item["items"][0]["path"] for item in remaining] == ["/third.txt"]
+
+            for name in ("first.txt", "second.txt"):
+                deleted = client.delete(f"/{name}", headers=alice_headers)
+                assert deleted.status_code == 200
+
+            orphan = root / ".xwing-trash" / "orphan"
+            orphan.write_text("orphan")
+            emptied = client.delete("/api/admin/trash", headers=admin_headers)
+            assert emptied.status_code == 200
+            assert emptied.json()["deleted"] == 3
+            assert emptied.json()["transactions"] == 3
+            assert not orphan.exists()
+            assert (
+                client.get("/api/admin/trash", headers=admin_headers).json()[
+                    "transactions"
+                ]
+                == []
+            )
+            records = json.loads((root / ".xwing-trash" / ".index.json").read_text())
+            assert records == []
+
     def test_trash_index_survives_app_restart(
         self, root, tmp_dir, tmp_path, monkeypatch
     ):

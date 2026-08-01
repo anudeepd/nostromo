@@ -46,6 +46,7 @@
 .admin-card p { color: var(--admin-muted); font-size: 13px; line-height: 1.55; }
 .admin-card .muted { color: var(--admin-faint); }
 .button { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--admin-line-hi); border-radius: 7px; background: var(--admin-raised); color: var(--admin-text); padding: 0 12px; font: 500 12px "IBM Plex Sans", system-ui, sans-serif; cursor: pointer; text-decoration: none; transition: transform var(--xw-micro) var(--xw-ease), border-color var(--xw-micro), background-color var(--xw-micro), color var(--xw-micro); touch-action: manipulation; }
+.admin-body .button { width: auto; }
 .button:hover { border-color: #6a5ca1; background: #20263a; }
 .button:active { transform: translateY(1px); }
 .button.primary { border-color: #7565b1; background: #342a60; color: #f2efff; }
@@ -75,11 +76,14 @@ td strong { color: var(--admin-text); font-weight: 500; }
 .activity-table th:nth-child(3) { width: 18%; }
 .activity-table th:nth-child(4) { width: 44%; }
 .activity-table th:nth-child(5) { width: 10%; }
-.trash-table th:nth-child(1) { width: 14%; }
-.trash-table th:nth-child(2) { width: 35%; }
-.trash-table th:nth-child(3) { width: 15%; }
-.trash-table th:nth-child(4) { width: 10%; }
-.trash-table th:nth-child(5) { width: 26%; }
+.trash-table th:nth-child(1) { width: 5%; }
+.trash-table th:nth-child(2) { width: 14%; }
+.trash-table th:nth-child(3) { width: 35%; }
+.trash-table th:nth-child(4) { width: 15%; }
+.trash-table th:nth-child(5) { width: 10%; }
+.trash-table th:nth-child(6) { width: 21%; }
+.trash-select-cell { text-align: center; }
+.trash-select-cell input { width: 16px; height: 16px; margin: 0; accent-color: var(--admin-accent); }
 .empty-cell { padding: 30px 16px; color: var(--admin-faint); text-align: center; }
 .permission-badges { display: flex; flex-wrap: wrap; gap: 5px; }
 .permission-badge { display: inline-flex; min-height: 22px; align-items: center; padding: 0 7px; border: 1px solid var(--admin-line-hi); border-radius: 999px; color: var(--admin-muted); font: 500 10px "IBM Plex Mono", monospace; }
@@ -159,6 +163,10 @@ td strong { color: var(--admin-text); font-weight: 500; }
   .admin-card { padding: 15px; }
   .card-heading { align-items: center; }
   .row-actions { flex-direction: column; align-items: stretch; }
+  .card-heading:has(.trash-card-actions) { display: block; }
+  .trash-table { min-width: 680px; }
+  .trash-table .empty-cell { text-align: left; }
+  .trash-card-actions { flex-direction: row; align-items: stretch; justify-content: flex-start; margin-top: 14px; }
   .activity-tools { grid-template-columns: 1fr; gap: 12px; }
   .activity-filter-form, .purge-form { grid-template-columns: 1fr; }
   .purge-form { padding-left: 0; border-left: 0; border-top: 1px solid var(--admin-line); padding-top: 12px; }

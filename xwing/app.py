@@ -103,6 +103,10 @@ class AdminUserPayload(BaseModel):
     permissions: AdminPermissionsPayload
 
 
+class AdminTrashRestorePayload(BaseModel):
+    transaction_ids: list[str]
+
+
 class FilePayload(BaseModel):
     name: str
     path: str
@@ -1487,17 +1491,7 @@ def create_app(settings: Settings) -> FastAPI:
             "size": sum(item["size"] for item in transactions),
         }
 
-    @app.get("/api/admin/trash", include_in_schema=False)
-    async def admin_trash(request: Request):
-        _admin_user(request)
-        return await anyio.to_thread.run_sync(_trash_payload)
-
-    @app.post("/api/admin/trash/{transaction_id}/restore", include_in_schema=False)
-    async def admin_restore_trash(transaction_id: str, request: Request):
-        actor = _admin_user(request)
-        transaction = delete_transactions.get(transaction_id)
-        if not transaction:
-            raise HTTPException(status_code=404, detail="Trash transaction not found")
+    async def _restore_transaction_items(transaction: dict) -> list[str]:
         restored_paths = []
         for item in transaction["items"]:
             trash_path: Path = item["trash"]
@@ -1508,6 +1502,104 @@ def create_app(settings: Settings) -> FastAPI:
             target.parent.mkdir(parents=True, exist_ok=True)
             await anyio.to_thread.run_sync(shutil.move, str(trash_path), str(target))
             restored_paths.append(_to_rel_path(target))
+        return restored_paths
+
+    def _empty_trash() -> dict[str, int]:
+        deleted = sum(
+            1
+            for transaction in delete_transactions.values()
+            for item in transaction["items"]
+            if item["trash"].exists()
+        )
+        transactions = len(delete_transactions)
+        trash_dir = _trash_dir()
+        if trash_dir.exists():
+            for child in trash_dir.iterdir():
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+        delete_transactions.clear()
+        trash_store.save_transactions(trash_dir, settings.root_dir, delete_transactions)
+        return {"deleted": deleted, "transactions": transactions}
+
+    @app.get("/api/admin/trash", include_in_schema=False)
+    async def admin_trash(request: Request):
+        _admin_user(request)
+        return await anyio.to_thread.run_sync(_trash_payload)
+
+    @app.post("/api/admin/trash/restore", include_in_schema=False)
+    async def admin_restore_trash_bulk(
+        payload: AdminTrashRestorePayload, request: Request
+    ):
+        actor = _admin_user(request)
+        requested_ids = list(dict.fromkeys(payload.transaction_ids))
+        if not requested_ids:
+            raise HTTPException(
+                status_code=400, detail="Select at least one trash transaction"
+            )
+        missing = [
+            transaction_id
+            for transaction_id in requested_ids
+            if transaction_id not in delete_transactions
+        ]
+        if missing:
+            raise HTTPException(status_code=404, detail="Trash transaction not found")
+        transaction_ids = sorted(
+            requested_ids,
+            key=lambda transaction_id: (
+                delete_transactions[transaction_id].get("created", 0),
+                transaction_id,
+            ),
+            reverse=True,
+        )
+        restored_paths = []
+        for transaction_id in transaction_ids:
+            transaction = delete_transactions[transaction_id]
+            restored_paths.extend(await _restore_transaction_items(transaction))
+            delete_transactions.pop(transaction_id, None)
+        await anyio.to_thread.run_sync(
+            trash_store.save_transactions,
+            _trash_dir(),
+            settings.root_dir,
+            delete_transactions,
+        )
+        await _record_admin_event(
+            actor,
+            "admin_trash_restore",
+            "/api/admin/trash/restore",
+            {
+                "restored": len(restored_paths),
+                "transactions": len(transaction_ids),
+                "paths": restored_paths,
+            },
+        )
+        return {
+            "ok": True,
+            "restored": len(restored_paths),
+            "transactions": len(transaction_ids),
+            "paths": restored_paths,
+        }
+
+    @app.delete("/api/admin/trash", include_in_schema=False)
+    async def admin_empty_trash(request: Request):
+        actor = _admin_user(request)
+        result = await anyio.to_thread.run_sync(_empty_trash)
+        await _record_admin_event(
+            actor,
+            "admin_trash_delete",
+            "/api/admin/trash",
+            result,
+        )
+        return {"ok": True, **result}
+
+    @app.post("/api/admin/trash/{transaction_id}/restore", include_in_schema=False)
+    async def admin_restore_trash(transaction_id: str, request: Request):
+        actor = _admin_user(request)
+        transaction = delete_transactions.get(transaction_id)
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Trash transaction not found")
+        restored_paths = await _restore_transaction_items(transaction)
         delete_transactions.pop(transaction_id, None)
         await anyio.to_thread.run_sync(
             trash_store.save_transactions,

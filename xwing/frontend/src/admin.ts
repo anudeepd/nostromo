@@ -131,12 +131,13 @@ type AdminState = {
   events: ActivityEvent[];
   activitySummary: { event_count: number; active_users: number; by_user: { username: string; event_count: number }[] };
   trash: TrashTransaction[];
+  selectedTrash: Set<string>;
 };
 
 const bootstrap = JSON.parse(document.getElementById("admin-bootstrap")?.textContent || "{}") as { user: string; ldapConfigured: boolean };
 const state: AdminState = {
   users: [], defaultPermissions: null, metrics: null, events: [],
-  activitySummary: { event_count: 0, active_users: 0, by_user: [] }, trash: [],
+  activitySummary: { event_count: 0, active_users: 0, by_user: [] }, trash: [], selectedTrash: new Set(),
 };
 const tabNames = ["overview", "users", "activity", "trash"];
 const requestedTab = location.hash.slice(1);
@@ -405,9 +406,30 @@ function activityMarkup(): string {
   return `<article class="admin-card"><div class="card-heading"><div><p class="eyebrow">AUDIT TRAIL</p><h2>User activity</h2></div><span class="count-badge">${state.activitySummary.event_count}</span></div><div class="activity-tools"><form id="activity-filter" class="inline-form activity-filter-form"><div class="filter-field"><label for="activity-user">User</label><input id="activity-user" name="username" placeholder="All users"/></div><div class="filter-field"><label for="activity-since">Since</label><input id="activity-since" name="since" type="date"/></div><div class="filter-field"><label for="activity-scope">Show</label><select id="activity-scope" name="scope"><option value="file" selected>File activity</option><option value="all">All events</option><option value="admin">Administration</option></select></div><button class="button" type="submit">Refresh</button></form><form id="audit-purge-form" class="inline-form purge-form"><div class="filter-field"><label for="audit-retention">Purge older than</label><div class="input-with-unit"><input id="audit-retention" name="older_than_days" type="number" min="1" max="36500" value="90" required/><span class="unit-label">days</span></div></div><button class="button danger" type="submit">Purge history</button></form></div><div class="table-wrap activity-table"><table><thead><tr><th scope="col">Time</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Path</th><th scope="col">Status</th></tr></thead><tbody>${state.events.map(activityRow).join("") || `<tr><td colspan="5" class="empty-cell">No activity matches filter.</td></tr>`}</tbody></table></div></article>`;
 }
 
+
 function trashMarkup(): string {
-  return `<article class="admin-card"><div class="card-heading"><div><p class="eyebrow">RECOVERY</p><h2>Recoverable trash</h2></div><button class="button" id="refresh-trash">Refresh</button></div><p class="field-help trash-help">Deleted items stay here until restored or permanently removed.</p><div class="table-wrap"><table class="trash-table"><thead><tr><th scope="col">Deleted by</th><th scope="col">Items</th><th scope="col">Deleted</th><th scope="col">Size</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${state.trash.map(transaction => `<tr><td><strong>${escapeHtml(transaction.user)}</strong></td><td class="trash-items">${transaction.items.map(item => `<div class="trash-path"><span class="trash-kind">${escapeHtml(item.kind)}</span><code>${escapeHtml(item.path)}</code></div>`).join("")}</td><td>${escapeHtml(formatDate(transaction.created))}</td><td>${escapeHtml(formatBytes(transaction.size))}</td><td><div class="row-actions"><button class="button small" data-restore-trash="${escapeHtml(transaction.transaction_id)}" aria-label="Restore deleted items">Restore</button><button class="button small danger" data-delete-trash="${escapeHtml(transaction.transaction_id)}" aria-label="Permanently delete items">Delete permanently</button></div></td></tr>`).join("") || `<tr><td colspan="5" class="empty-cell">Trash is empty.</td></tr>`}</tbody></table></div></article>`;
+  const hasTrash = state.trash.length > 0;
+  const selectedCount = state.selectedTrash.size;
+  const allSelected = hasTrash && state.trash.every(transaction => state.selectedTrash.has(transaction.transaction_id));
+  return `<article class="admin-card"><div class="card-heading"><div><p class="eyebrow">RECOVERY</p><h2>Recoverable trash</h2></div><div class="row-actions trash-card-actions"><button class="button small primary" id="restore-selected-trash" ${selectedCount ? "" : "disabled"}>Restore selected${selectedCount ? ` (${selectedCount})` : ""}</button><button class="button small danger" id="empty-trash" ${hasTrash ? "" : "disabled"}>Empty trash</button><button class="button small" id="refresh-trash">Refresh</button></div></div><p class="field-help trash-help">Select deleted transactions to restore in bulk. Deleted items stay here until restored or permanently removed.</p><div class="table-wrap"><table class="trash-table"><thead><tr><th scope="col" class="trash-select-cell"><input id="select-all-trash" type="checkbox" aria-label="Select all trash transactions" ${allSelected ? "checked" : ""} ${hasTrash ? "" : "disabled"}/></th><th scope="col">Deleted by</th><th scope="col">Items</th><th scope="col">Deleted</th><th scope="col">Size</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${state.trash.map(transaction => `<tr><td class="trash-select-cell"><input type="checkbox" data-select-trash="${escapeHtml(transaction.transaction_id)}" aria-label="Select trash transaction for ${escapeHtml(transaction.items.map(item => item.path).join(", "))}" ${state.selectedTrash.has(transaction.transaction_id) ? "checked" : ""}/></td><td><strong>${escapeHtml(transaction.user)}</strong></td><td class="trash-items">${transaction.items.map(item => `<div class="trash-path"><span class="trash-kind">${escapeHtml(item.kind)}</span><code>${escapeHtml(item.path)}</code></div>`).join("")}</td><td>${escapeHtml(formatDate(transaction.created))}</td><td>${escapeHtml(formatBytes(transaction.size))}</td><td><div class="row-actions"><button class="button small" data-restore-trash="${escapeHtml(transaction.transaction_id)}" aria-label="Restore deleted items">Restore</button><button class="button small danger" data-delete-trash="${escapeHtml(transaction.transaction_id)}" aria-label="Permanently delete items">Delete permanently</button></div></td></tr>`).join("") || `<tr><td colspan="6" class="empty-cell">Trash is empty.</td></tr>`}</tbody></table></div></article>`;
 }
+function syncTrashSelectionControls(): void {
+  const selectedCount = state.selectedTrash.size;
+  const hasTrash = state.trash.length > 0;
+  const allSelected = hasTrash && selectedCount === state.trash.length;
+  const restoreButton = document.getElementById("restore-selected-trash") as HTMLButtonElement | null;
+  if (restoreButton) {
+    restoreButton.disabled = selectedCount === 0;
+    restoreButton.textContent = `Restore selected${selectedCount ? ` (${selectedCount})` : ""}`;
+  }
+  const selectAll = document.getElementById("select-all-trash") as HTMLInputElement | null;
+  if (selectAll) {
+    selectAll.checked = allSelected;
+    selectAll.indeterminate = selectedCount > 0 && !allSelected;
+    selectAll.disabled = !hasTrash;
+  }
+}
+
 
 function bindView(): void {
   const userForm = document.getElementById("user-form") as HTMLFormElement | null;
@@ -430,6 +452,33 @@ function bindView(): void {
     });
   });
   document.getElementById("refresh-trash")?.addEventListener("click", () => void loadTrash());
+  document.getElementById("select-all-trash")?.addEventListener("change", event => {
+    const checked = (event.currentTarget as HTMLInputElement).checked;
+    state.selectedTrash = checked
+      ? new Set(state.trash.map(transaction => transaction.transaction_id))
+      : new Set();
+    root.querySelectorAll<HTMLInputElement>("[data-select-trash]").forEach(input => { input.checked = checked; });
+    syncTrashSelectionControls();
+  });
+  root.querySelectorAll<HTMLInputElement>("[data-select-trash]").forEach(input => input.addEventListener("change", event => {
+    const transactionId = input.dataset.selectTrash || "";
+    if ((event.currentTarget as HTMLInputElement).checked) state.selectedTrash.add(transactionId);
+    else state.selectedTrash.delete(transactionId);
+    syncTrashSelectionControls();
+  }));
+  document.getElementById("restore-selected-trash")?.addEventListener("click", () => {
+    const selectedTransactions = state.trash.filter(transaction => state.selectedTrash.has(transaction.transaction_id));
+    const itemCount = selectedTransactions.reduce((total, transaction) => total + transaction.items.length, 0);
+    void dialogs.confirm(`Restore ${selectedTransactions.length} selected transaction${selectedTransactions.length === 1 ? "" : "s"}?`, `Restore ${itemCount} deleted item${itemCount === 1 ? "" : "s"} now.`, "Restore selected").then(confirmed => {
+      if (confirmed) void restoreSelectedTrash();
+    });
+  });
+  document.getElementById("empty-trash")?.addEventListener("click", () => {
+    const count = state.trash.reduce((total, transaction) => total + transaction.items.length, 0);
+    void dialogs.confirm("Empty trash permanently?", `Permanently delete ${count} trashed item${count === 1 ? "" : "s"}.`, "Empty trash").then(confirmed => {
+      if (confirmed) void emptyTrash();
+    });
+  });
   root.querySelectorAll<HTMLButtonElement>("[data-restore-trash]").forEach(button => button.addEventListener("click", () => void restoreTrash(button.dataset.restoreTrash || "")));
   root.querySelectorAll<HTMLButtonElement>("[data-delete-trash]").forEach(button => button.addEventListener("click", () => {
     const transactionId = button.dataset.deleteTrash || "";
@@ -487,13 +536,15 @@ async function deleteUser(username: string): Promise<void> {
 }
 
 async function loadUsers(): Promise<void> { try { const result = await api<{ users: UserRecord[]; default: PermissionSet | null }>("/api/admin/users"); state.users = result.users; state.defaultPermissions = result.default; suppressViewAnimation = true; render(); } catch (error) { showError(error); } }
-async function loadTrash(): Promise<void> { try { const result = await api<{ transactions: TrashTransaction[] }>("/api/admin/trash"); state.trash = result.transactions; suppressViewAnimation = true; render(); } catch (error) { showError(error); } }
+async function loadTrash(): Promise<void> { try { const result = await api<{ transactions: TrashTransaction[] }>("/api/admin/trash", { cache: "no-store" }); state.trash = result.transactions; state.selectedTrash = new Set([...state.selectedTrash].filter(transactionId => state.trash.some(transaction => transaction.transaction_id === transactionId))); suppressViewAnimation = true; render(); } catch (error) { showError(error); } }
 async function loadMetrics(): Promise<void> { try { state.metrics = await api<Metrics>("/api/admin/metrics"); suppressViewAnimation = true; render(); } catch (error) { showError(error); } }
 async function loadActivity(form?: HTMLFormElement): Promise<void> { try { const params = new URLSearchParams({ limit: "200" }); const username = form && (form.elements.namedItem("username") as HTMLInputElement).value; const since = form && (form.elements.namedItem("since") as HTMLInputElement).value; const scope = form ? (form.elements.namedItem("scope") as HTMLSelectElement).value : "file"; if (username) params.set("username", username); if (since) params.set("since", `${since}T00:00:00+00:00`); params.set("scope", scope); const result = await api<{ events: ActivityEvent[]; summary: AdminState["activitySummary"] }>(`/api/admin/activity?${params}`); state.events = result.events; state.activitySummary = result.summary; suppressViewAnimation = true; render(); const nextUsername = document.getElementById("activity-user") as HTMLInputElement | null; if (nextUsername) nextUsername.value = username || ""; const nextSince = document.getElementById("activity-since") as HTMLInputElement | null; if (nextSince) nextSince.value = since || ""; const nextScope = document.getElementById("activity-scope") as HTMLSelectElement | null; if (nextScope) nextScope.value = scope; } catch (error) { showError(error); } }
 async function purgeAuditHistory(form: HTMLFormElement): Promise<void> { try { const days = (form.elements.namedItem("older_than_days") as HTMLInputElement).value; const result = await api<{ deleted: number; older_than_days: number }>(`/api/admin/activity?older_than_days=${encodeURIComponent(days)}`, { method: "DELETE" }); await loadActivity(); showSuccess(`Purged ${result.deleted} audit event${result.deleted === 1 ? "" : "s"}.`); } catch (error) { showError(error); } }
 
 async function restoreTrash(transactionId: string): Promise<void> { try { const result = await api<{ restored: number }>(`/api/admin/trash/${encodeURIComponent(transactionId)}/restore`, { method: "POST" }); await loadTrash(); showSuccess(`${result.restored} item${result.restored === 1 ? "" : "s"} restored.`); } catch (error) { showError(error); } }
 async function deleteTrash(transactionId: string): Promise<void> { try { const result = await api<{ deleted: number }>(`/api/admin/trash/${encodeURIComponent(transactionId)}`, { method: "DELETE" }); await loadTrash(); showSuccess(`${result.deleted} trash item${result.deleted === 1 ? "" : "s"} permanently deleted.`); } catch (error) { showError(error); } }
+async function restoreSelectedTrash(): Promise<void> { const transactionIds = [...state.selectedTrash]; try { const result = await api<{ restored: number }>("/api/admin/trash/restore", { method: "POST", body: JSON.stringify({ transaction_ids: transactionIds }) }); state.selectedTrash.clear(); await loadTrash(); showSuccess(`${result.restored} item${result.restored === 1 ? "" : "s"} restored.`); } catch (error) { showError(error); } }
+async function emptyTrash(): Promise<void> { try { const result = await api<{ deleted: number }>("/api/admin/trash", { method: "DELETE" }); await loadTrash(); showSuccess(`${result.deleted} trash item${result.deleted === 1 ? "" : "s"} permanently deleted.`); } catch (error) { showError(error); } }
 
 async function loadData(): Promise<void> {
   try {
