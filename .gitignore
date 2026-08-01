@@ -15,7 +15,7 @@ xwing/static/assets/*
 node_modules/
 package-lock.json
 scripts/node_modules/
-scripts/package-lock.json
+!scripts/package-lock.json
 scripts/test-results/
 
 # Runtime
