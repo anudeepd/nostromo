@@ -332,18 +332,17 @@ class TestAuth:
         assert "xwing:login:username" in template
         assert "Signing in" in template
         assert "security-lock" in template
-        assert "max-width: 380px;" in template
+        assert "max-width: 400px;" in template
         assert "min-height: 40px;" in template
         assert "line-height: 1.25rem;" in template
         assert ".submit-label { min-width: 4.75rem; }" in template
-        assert "appearance: none;" in template
-        assert "-webkit-appearance: none;" in template
-        assert ".password-field" in template
-        assert "padding-right: 2.75rem;" in template
-        assert 'class="password-toggle"' in template
-        assert "password.type = visible ? 'text' : 'password';" in template
-        assert 'input[type="password"]::-ms-reveal' in template
-        assert 'input[type="password"]::-moz-reveal' in template
+        assert "appearance: none;" not in template
+        assert "-webkit-appearance: none;" not in template
+        assert ".password-field" not in template
+        assert "padding-right: 2.75rem;" not in template
+        assert 'class="password-toggle"' not in template
+        assert "::-ms-reveal" not in template
+        assert "::-moz-reveal" not in template
         assert 'style="' not in template
 
     def test_login_template_keeps_ldapgate_shape_with_brand_safe_deltas(self):
