@@ -910,6 +910,55 @@ class TestBulkDelete:
         assert (root / ".xwing-trash").is_dir()
         assert (root / "keep.txt").exists()
 
+    def test_bulk_operations_are_audited_with_selected_paths(
+        self, root, tmp_dir, users_yaml, tmp_path
+    ):
+        (root / "a.txt").write_text("hello")
+        (root / "docs").mkdir()
+        (root / "docs" / "b.txt").write_text("world")
+        audit_db = tmp_path / "audit.db"
+        settings = Settings(
+            root_dir=root,
+            tmp_dir=tmp_dir,
+            users_config=users_yaml,
+            trusted_auth_proxies=["testclient"],
+            admin_users=["admin"],
+            audit_db=audit_db,
+        )
+        headers = {"X-Forwarded-User": "admin"}
+
+        with TestClient(create_app(settings)) as c:
+            zipped = c.post(
+                "/_bulk/zip",
+                headers=headers,
+                json={"base": "/", "paths": ["/a.txt", "/docs/"]},
+            )
+            assert zipped.status_code == 200
+
+            deleted = c.post(
+                "/_bulk/delete",
+                headers=headers,
+                json={"paths": ["/a.txt", "/docs/"]},
+            )
+            assert deleted.status_code == 200
+
+            activity = c.get(
+                "/api/admin/activity?scope=file",
+                headers=headers,
+            )
+
+        assert activity.status_code == 200
+        events = {event["method"]: event for event in activity.json()["events"]}
+        assert set(events) == {"bulk_zip", "bulk_delete"}
+        assert json.loads(events["bulk_zip"]["details"])["paths"] == [
+            "/a.txt",
+            "/docs",
+        ]
+        assert json.loads(events["bulk_delete"]["details"])["paths"] == [
+            "/a.txt",
+            "/docs",
+        ]
+
     def test_bulk_delete_can_be_restored(self, client, root):
         (root / "a.txt").write_text("hello")
         (root / "sub").mkdir()

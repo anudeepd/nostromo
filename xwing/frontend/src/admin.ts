@@ -326,7 +326,8 @@ const activityLabels: Record<string, string> = {
   upload: "Uploaded",
   download: "Downloaded",
   delete: "Moved to trash",
-  bulk_delete: "Moved to trash",
+  bulk_delete: "Moved selected items to trash",
+  bulk_zip: "Downloaded selected items",
   restore: "Restored",
   mkdir: "Created folder",
   copy: "Copied",
@@ -343,32 +344,60 @@ function activityLabel(method: string): string {
   return activityLabels[method] || method.replace(/^admin_/, "").replace(/_/g, " ");
 }
 
-function activityDetails(event: ActivityEvent): string | null {
-  if (!event.details) return null;
+
+type ActivityDetails = { summary: string | null; paths: string[] };
+
+function activityDetails(event: ActivityEvent): ActivityDetails {
+  if (!event.details) return { summary: null, paths: [] };
   try {
     const value: unknown = JSON.parse(event.details);
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return { summary: null, paths: [] };
     const details = value as Record<string, unknown>;
     const count = Number(details.count ?? details.restored ?? details.deleted);
-    if (Number.isFinite(count) && count > 0) return `${count} item${count === 1 ? "" : "s"}`;
-    if (event.method === "upload" && Number.isFinite(Number(details.bytes))) return `${formatBytes(Number(details.bytes))}`;
+    const countLabel = Number.isFinite(count) && count > 0
+      ? `${count} item${count === 1 ? "" : "s"}`
+      : null;
+    const paths = Array.isArray(details.paths)
+      ? details.paths.filter((path): path is string => typeof path === "string" && path.length > 0)
+      : [];
+    if (paths.length) {
+      const preview = paths.slice(0, 3).join(", ");
+      const remaining = paths.length - 3;
+      return {
+        summary: `${countLabel ? `${countLabel}: ` : ""}${preview}${remaining > 0 ? `, +${remaining} more` : ""}`,
+        paths,
+      };
+    }
+    if (countLabel) return { summary: countLabel, paths };
+    if (event.method === "upload" && Number.isFinite(Number(details.bytes))) {
+      return { summary: formatBytes(Number(details.bytes)), paths };
+    }
     if (event.method === "admin_user_upsert" || event.method === "admin_user_delete") {
-      return typeof details.username === "string" ? details.username : null;
+      return {
+        summary: typeof details.username === "string" ? details.username : null,
+        paths,
+      };
     }
     if (event.method === "admin_audit_purge") {
       const days = Number(details.older_than_days);
-      return Number.isFinite(days) ? `Older than ${days} days` : null;
+      return {
+        summary: Number.isFinite(days) ? `Older than ${days} days` : null,
+        paths,
+      };
     }
-    return null;
+    return { summary: null, paths };
   } catch {
-    return null;
+    return { summary: null, paths: [] };
   }
 }
 
 
 function activityRow(event: ActivityEvent): string {
   const detail = activityDetails(event);
-  return `<tr><td>${escapeHtml(formatDate(event.occurred_at))}</td><td><strong>${escapeHtml(event.username)}</strong></td><td><span class="activity-action">${escapeHtml(activityLabel(event.method))}</span>${detail ? `<small class="activity-detail">${escapeHtml(detail)}</small>` : ""}</td><td class="path-cell" title="${escapeHtml(event.path)}"><code>${escapeHtml(event.path)}</code></td><td><span class="status-code ${event.status_code >= 400 ? "bad" : "good"}">${event.status_code}</span></td></tr>`;
+  const detailMarkup = detail.paths.length
+    ? `<details class="activity-detail-list"><summary>${escapeHtml(detail.summary || `${detail.paths.length} selected items`)}</summary><ul>${detail.paths.map(path => `<li><code>${escapeHtml(path)}</code></li>`).join("")}</ul></details>`
+    : detail.summary ? `<small class="activity-detail">${escapeHtml(detail.summary)}</small>` : "";
+  return `<tr><td>${escapeHtml(formatDate(event.occurred_at))}</td><td><strong>${escapeHtml(event.username)}</strong></td><td><span class="activity-action">${escapeHtml(activityLabel(event.method))}</span>${detailMarkup}</td><td class="path-cell" title="${escapeHtml(event.path)}"><code>${escapeHtml(event.path)}</code></td><td><span class="status-code ${event.status_code >= 400 ? "bad" : "good"}">${event.status_code}</span></td></tr>`;
 }
 
 

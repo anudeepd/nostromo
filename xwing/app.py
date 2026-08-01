@@ -230,7 +230,7 @@ def create_app(settings: Settings) -> FastAPI:
             return True
         if request.url.path == "/admin":
             return True
-        if request.url.path == "/_bulk/delete":
+        if request.url.path in {"/_bulk/delete", "/_bulk/zip"}:
             return True
         if request.url.path.startswith("/api/restore/"):
             return True
@@ -1016,10 +1016,12 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.post("/_bulk/zip", include_in_schema=False)
     async def bulk_zip(request: Request):
+        started = time.monotonic()
         user = get_user(request, settings)
         require_perm(user, "read", settings)
         body = await _bulk_body(request)
         paths = _resolve_bulk_paths(body.get("paths"))
+        rel_paths = [_to_rel_path(fspath) for fspath in paths]
         base_raw = body.get("base", "/")
         if not isinstance(base_raw, str):
             raise HTTPException(status_code=400, detail="base must be a string")
@@ -1036,13 +1038,25 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(
                 status_code=404, detail="Selected path not found"
             ) from None
-        return Response(
+        response = Response(
             zip_bytes,
             media_type="application/zip",
             headers={
                 "Content-Disposition": f"attachment; filename*=UTF-8''{quote(timestamped_selection_zip_name())}"
             },
         )
+        await _record_semantic_audit(
+            user=user,
+            operation="bulk_zip",
+            path="/_bulk/zip",
+            details=json.dumps(
+                {"count": len(rel_paths), "paths": rel_paths},
+                ensure_ascii=False,
+            ),
+            status_code=response.status_code,
+            started=started,
+        )
+        return response
 
     @app.post("/_bulk/delete", include_in_schema=False)
     async def bulk_delete(request: Request):

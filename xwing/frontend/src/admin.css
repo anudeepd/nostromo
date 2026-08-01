@@ -124,6 +124,13 @@ td strong { color: var(--admin-text); font-weight: 500; }
 .path-cell code { color: var(--admin-text); font: 11px/1.5 "IBM Plex Mono", monospace; white-space: inherit; }
 .activity-action, .activity-detail { display: block; }
 .activity-detail { margin-top: 4px; color: var(--admin-faint); font: 11px/1.35 "IBM Plex Mono", monospace; }
+.activity-detail-list { margin-top: 4px; color: var(--admin-faint); font: 11px/1.35 "IBM Plex Mono", monospace; }
+.activity-detail-list summary { cursor: pointer; overflow-wrap: anywhere; }
+.activity-detail-list summary::marker { color: var(--admin-accent); }
+.activity-detail-list[open] summary { margin-bottom: 5px; }
+.activity-detail-list ul { max-height: 180px; overflow-y: auto; margin: 0; padding: 0 8px 0 18px; border-left: 1px solid var(--admin-line); list-style: none; }
+.activity-detail-list li + li { margin-top: 3px; }
+.activity-detail-list code { color: var(--admin-text); font: inherit; overflow-wrap: anywhere; white-space: normal; }
 .status-code { font: 600 11px "IBM Plex Mono", monospace; }
 .status-code.good { color: var(--admin-good); }
 .status-code.bad { color: var(--admin-danger); }
