@@ -4,6 +4,9 @@ ldap:
     bind_password: "replace-with-bind-password"
     base_dn: dc=example,dc=com
     user_filter: "(uid={username})"
+    # Sized for login bursts across at least 200 active users.
+    timeout: 30
+    pool_size: 16
     allowed_users:
         - alice
         - bob

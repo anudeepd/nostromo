@@ -215,7 +215,7 @@ wheels = [
 
 [[package]]
 name = "ldapgate"
-version = "0.1.23"
+version = "0.1.24"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -231,9 +231,9 @@ dependencies = [
     { name = "starlette" },
     { name = "uvicorn", extra = ["standard"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a7/e8/fd26b559ec08039bcddf7558571c2037faa4a90b6013e6c0160c635f46c9/ldapgate-0.1.23.tar.gz", hash = "sha256:072125694bb28c2a541b381abcef6a715739f038fb352c898b8b689c47a40208", size = 156110, upload-time = "2026-08-02T05:03:26.063Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dd/6f/57f519faf2d48921ea518309ea9632f5be50fd72aafb3083e45a9cf18b0b/ldapgate-0.1.24.tar.gz", hash = "sha256:555bdc069c2143c2aaa65ddf472e23552f9d24aee2fc7fc2f36e5ca82b3a974e", size = 156865, upload-time = "2026-08-03T15:24:44.822Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/01/91ad14113265c5094918bfc073410590d71e34e7891f23454be163b1aaf5/ldapgate-0.1.23-py3-none-any.whl", hash = "sha256:449b42032e34e972e2b689f805fabff14e1571b7459ce4b2902980d822607339", size = 142605, upload-time = "2026-08-02T05:03:23.857Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/d8/5a486e6e955308dc178723b48d763048576ea88538192ee3bec601f37fcc/ldapgate-0.1.24-py3-none-any.whl", hash = "sha256:4c35c75870a9bae1a283e9c5c349b911cafded786587ce1e3f415e15439dd93b", size = 142347, upload-time = "2026-08-03T15:24:42.914Z" },
 ]
 
 [[package]]
@@ -981,7 +981,7 @@ wheels = [
 
 [[package]]
 name = "xwing"
-version = "0.3.38"
+version = "0.3.39"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
@@ -1015,7 +1015,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.111.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.1" },
     { name = "jinja2", specifier = ">=3.1.0" },
-    { name = "ldapgate", marker = "extra == 'ldap'", specifier = ">=0.1.23" },
+    { name = "ldapgate", marker = "extra == 'ldap'", specifier = ">=0.1.24" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21" },
     { name = "python-multipart", specifier = ">=0.0.9" },
