@@ -343,7 +343,7 @@ class TestAuth:
         assert 'class="password-toggle"' in template
         assert "password.type = showing ? 'text' : 'password';" in template
         assert "password.focus();" in template
-        assert "::-ms-reveal" not in template
+        assert 'input[type="password"]::-ms-reveal' in template
         assert "::-moz-reveal" not in template
         assert 'style="' not in template
 
