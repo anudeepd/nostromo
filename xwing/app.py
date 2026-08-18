@@ -374,6 +374,8 @@ def create_app(settings: Settings) -> FastAPI:
     _ldap_config_path = settings.ldap_config or (
         Path(env_path) if (env_path := os.getenv("XWING_LDAP_CONFIG")) else None
     )
+    ldap_config = None
+    ldap_session_manager = None
     ldap_idle_timeout = 0
     if _ldap_config_path:
         try:
@@ -392,7 +394,7 @@ def create_app(settings: Settings) -> FastAPI:
             getattr(getattr(ldap_config, "proxy", None), "idle_timeout", 0) or 0
         )
         _login_template = TEMPLATES_DIR / "login.html"
-        add_ldap_auth(
+        ldap_session_manager = add_ldap_auth(
             app,
             ldap_config,
             template_path=str(_login_template) if _login_template.exists() else None,
@@ -1244,6 +1246,23 @@ def create_app(settings: Settings) -> FastAPI:
             except OSError:
                 pass
 
+    def _apply_live_ldap_allowlist(document: dict) -> None:
+        if ldap_config is None:
+            return
+        section = document.get("ldap")
+        if not isinstance(section, dict) or "allowed_users" not in section:
+            return
+        ldap_config.ldap.allowed_users = list(section["allowed_users"])
+
+    def _revoke_ldap_user_sessions(username: str) -> int:
+        if ldap_session_manager is None:
+            return 0
+        revoke = getattr(ldap_session_manager, "revoke_user_sessions", None)
+        if not callable(revoke):
+            return 0
+        result = revoke(username)
+        return int(result) if result else 0
+
     def _prepare_ldap_user_document(entries: dict) -> tuple[Path, dict] | None:
         if _ldap_config_path is None:
             return None
@@ -1280,15 +1299,23 @@ def create_app(settings: Settings) -> FastAPI:
         users_path: Path,
         users_document: dict,
         ldap_update: tuple[Path, dict] | None,
-    ) -> None:
+    ) -> bool:
+        live_applied = False
         try:
             original_users = users_path.read_bytes()
+            original_ldap: bytes | None = None
+            if ldap_update is not None:
+                original_ldap = ldap_update[0].read_bytes()
             _write_yaml_document(users_path, users_document)
             try:
                 if ldap_update is not None:
                     _write_yaml_document(*ldap_update)
+                    _apply_live_ldap_allowlist(ldap_update[1])
+                    live_applied = ldap_config is not None
             except Exception:
                 users_path.write_bytes(original_users)
+                if ldap_update is not None and original_ldap is not None:
+                    ldap_update[0].write_bytes(original_ldap)
                 raise
             settings._user_config = UserConfig(users_path)
             settings._config_mtime = users_path.stat().st_mtime
@@ -1299,6 +1326,7 @@ def create_app(settings: Settings) -> FastAPI:
                 status_code=500,
                 detail=f"Could not save users and LDAP config: {exc}",
             ) from None
+        return live_applied
 
     async def _record_admin_event(
         user: str,
@@ -1349,7 +1377,11 @@ def create_app(settings: Settings) -> FastAPI:
                 del entries[existing]
         entries[username] = payload.permissions.model_dump()
         ldap_update = _prepare_ldap_user_document(entries)
-        _save_user_documents(path, document, ldap_update)
+        live_applied = _save_user_documents(path, document, ldap_update)
+        if live_applied:
+            restore = getattr(ldap_session_manager, "restore_user_sessions", None)
+            if callable(restore):
+                await anyio.to_thread.run_sync(restore, username)
         await _record_admin_event(
             actor,
             "admin_user_upsert",
@@ -1362,7 +1394,7 @@ def create_app(settings: Settings) -> FastAPI:
         )
         return {
             "ok": True,
-            "restart_required": ldap_update is not None,
+            "restart_required": not live_applied,
             **_users_payload(entries),
         }
 
@@ -1376,7 +1408,12 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(status_code=404, detail="User not found")
         del entries[matching]
         ldap_update = _prepare_ldap_user_document(entries)
-        _save_user_documents(path, document, ldap_update)
+        live_applied = _save_user_documents(path, document, ldap_update)
+        revoked_sessions = (
+            await anyio.to_thread.run_sync(_revoke_ldap_user_sessions, username)
+            if live_applied
+            else 0
+        )
         await _record_admin_event(
             actor,
             "admin_user_delete",
@@ -1385,7 +1422,8 @@ def create_app(settings: Settings) -> FastAPI:
         )
         return {
             "ok": True,
-            "restart_required": ldap_update is not None,
+            "restart_required": not live_applied,
+            "revoked_sessions": revoked_sessions,
             **_users_payload(entries),
         }
 

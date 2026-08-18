@@ -1466,7 +1466,8 @@ class TestAdminConsole:
                 idle_timeout=0,
                 trusted_proxies=[],
                 session_cookie_name="ldapgate_session",
-            )
+            ),
+            ldap=types.SimpleNamespace(allowed_users=[]),
         )
         config_mod.load_config = lambda path: loaded_config
         middleware_mod.add_ldap_auth = lambda app, config, template_path=None: None
@@ -1482,10 +1483,10 @@ class TestAdminConsole:
             admin_users=["admin"],
             trusted_auth_proxies=["testclient"],
             audit_db=audit_db or (tmp_path / "audit.db"),
-        ), users
+        ), users, loaded_config
 
     def test_admin_page_and_user_management(self, root, tmp_dir, tmp_path, monkeypatch):
-        settings, users = self._settings(root, tmp_dir, tmp_path, monkeypatch)
+        settings, users, loaded_config = self._settings(root, tmp_dir, tmp_path, monkeypatch)
         admin_headers = {"X-Forwarded-User": "admin"}
         alice_headers = {"X-Forwarded-User": "alice"}
         with TestClient(create_app(settings)) as client:
@@ -1522,18 +1523,20 @@ class TestAdminConsole:
                 },
             )
             assert created.status_code == 200
-            assert created.json()["restart_required"] is True
+            assert created.json()["restart_required"] is False
             assert "bob" in {item["username"] for item in created.json()["users"]}
             assert yaml.safe_load((tmp_path / "ldapgate.yaml").read_text())["ldap"][
                 "allowed_users"
             ] == ["admin", "alice", "bob"]
+            assert loaded_config.ldap.allowed_users == ["admin", "alice", "bob"]
 
             forbidden = client.get("/api/admin/users", headers=alice_headers)
             assert forbidden.status_code == 403
 
             deleted = client.delete("/api/admin/users/bob", headers=admin_headers)
             assert deleted.status_code == 200
-            assert deleted.json()["restart_required"] is True
+            assert deleted.json()["restart_required"] is False
+            assert loaded_config.ldap.allowed_users == ["admin", "alice"]
             assert "bob" not in users.read_text()
             assert (
                 "bob"
@@ -1600,7 +1603,7 @@ class TestAdminConsole:
     def test_admin_metrics_use_current_activity_window_and_purge_history(
         self, root, tmp_dir, tmp_path, monkeypatch
     ):
-        settings, _ = self._settings(root, tmp_dir, tmp_path, monkeypatch)
+        settings, _, _ = self._settings(root, tmp_dir, tmp_path, monkeypatch)
         admin_headers = {"X-Forwarded-User": "admin"}
         alice_headers = {"X-Forwarded-User": "alice"}
         with TestClient(create_app(settings)) as client:
@@ -1627,7 +1630,7 @@ class TestAdminConsole:
     def test_admin_can_restore_and_purge_persistent_trash(
         self, root, tmp_dir, tmp_path, monkeypatch
     ):
-        settings, _ = self._settings(root, tmp_dir, tmp_path, monkeypatch)
+        settings, _, _ = self._settings(root, tmp_dir, tmp_path, monkeypatch)
         (root / "restore.txt").write_text("recover")
         admin_headers = {"X-Forwarded-User": "admin"}
         alice_headers = {"X-Forwarded-User": "alice"}
@@ -1663,7 +1666,7 @@ class TestAdminConsole:
     def test_admin_can_restore_selected_or_empty_trash(
         self, root, tmp_dir, tmp_path, monkeypatch
     ):
-        settings, _ = self._settings(root, tmp_dir, tmp_path, monkeypatch)
+        settings, _, _ = self._settings(root, tmp_dir, tmp_path, monkeypatch)
         for name in ("first.txt", "second.txt", "third.txt"):
             (root / name).write_text(name)
         admin_headers = {"X-Forwarded-User": "admin"}
@@ -1714,7 +1717,7 @@ class TestAdminConsole:
     def test_trash_index_survives_app_restart(
         self, root, tmp_dir, tmp_path, monkeypatch
     ):
-        settings, _ = self._settings(root, tmp_dir, tmp_path, monkeypatch)
+        settings, _, _ = self._settings(root, tmp_dir, tmp_path, monkeypatch)
         (root / "restart.txt").write_text("persist")
         headers = {"X-Forwarded-User": "alice"}
         admin_headers = {"X-Forwarded-User": "admin"}

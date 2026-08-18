@@ -309,7 +309,7 @@ function overviewMarkup(): string {
 
 function userAccessHelp(): string {
   return bootstrap.ldapConfigured
-    ? "LDAPGate users are synchronized to ldap.allowed_users; restart X-wing after access changes."
+    ? "LDAPGate users are synchronized to ldap.allowed_users live; no restart required."
     : "Permissions apply to authenticated usernames listed in users.yaml.";
 }
 
@@ -515,7 +515,7 @@ async function saveUser(form: HTMLFormElement): Promise<void> {
     showSuccess(
       result.restart_required
         ? `Saved ${username}. Restart X-wing to apply LDAP access changes.`
-        : `Saved ${username}.`,
+        : `Saved ${username}. Access updated live.`,
     );
   } catch (error) { showError(error); }
 }
@@ -530,7 +530,7 @@ async function deleteUser(username: string): Promise<void> {
     showSuccess(
       result.restart_required
         ? `Deleted ${username}. Restart X-wing to apply LDAP access changes.`
-        : `Deleted ${username}.`,
+        : `Deleted ${username}. Access updated live.`,
     );
   } catch (error) { showError(error); }
 }
