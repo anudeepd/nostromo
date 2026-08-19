@@ -68,7 +68,7 @@ def _configure_logging(log_file: Path | None) -> None:
     "--max-chunk-mb",
     default=None,
     type=int,
-    help="Max chunk size in MB [default: 100].",
+    help="Max chunk size in MB [default: 128].",
 )
 @click.option(
     "--max-chunks",

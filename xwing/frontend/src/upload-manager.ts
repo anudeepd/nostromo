@@ -19,6 +19,7 @@ export interface UploadItem {
   destination: string;
   size: number;
   uploaded: number;
+  speed: number;
   status: UploadStatus;
   error?: string | undefined;
 }
@@ -31,6 +32,39 @@ interface InternalItem extends UploadItem {
   nextChunk: number;
   completedChunks: Set<number>;
   controller: AbortController;
+  /** Bytes currently in flight per chunk index (from the XHR `progress` event). */
+  inflightBytes: Map<number, number>;
+  /** Monotonic high-water mark of displayed uploaded bytes (clamps retry regressions). */
+  lastReported: number;
+  tracker: SpeedTracker;
+}
+
+export class SpeedTracker {
+  private samples: Array<{ t: number; b: number }> = [];
+  private readonly windowMs = 5000;
+  private readonly maxSamples = 20;
+
+  sample(bytes: number): void {
+    const now = Date.now();
+    const cutoff = now - this.windowMs;
+    this.samples = [...this.samples, { t: now, b: bytes }].filter(sample => sample.t >= cutoff);
+    if (this.samples.length > this.maxSamples) {
+      this.samples = this.samples.slice(this.samples.length - this.maxSamples);
+    }
+  }
+
+  speed(): number {
+    if (this.samples.length < 2) return 0;
+    const first = this.samples[0]!;
+    const last = this.samples[this.samples.length - 1]!;
+    const elapsedSeconds = (last.t - first.t) / 1000;
+    if (elapsedSeconds <= 0) return 0;
+    return (last.b - first.b) / elapsedSeconds;
+  }
+
+  reset(): void {
+    this.samples = [];
+  }
 }
 
 export interface UploadSnapshot {
@@ -88,6 +122,7 @@ export class UploadManager {
         relativePath,
         size: file.size,
         uploaded: 0,
+        speed: 0,
         status: "queued",
         file,
         destination,
@@ -96,6 +131,9 @@ export class UploadManager {
         nextChunk: 0,
         completedChunks: new Set(),
         controller: new AbortController(),
+        inflightBytes: new Map(),
+        lastReported: 0,
+        tracker: new SpeedTracker(),
       });
     }
     this.flush(true);
@@ -122,6 +160,10 @@ export class UploadManager {
     item.nextChunk = 0;
     item.completedChunks.clear();
     item.uploaded = 0;
+    item.inflightBytes.clear();
+    item.lastReported = 0;
+    item.tracker.reset();
+    item.speed = 0;
     item.status = item.sessionId ? "uploading" : "queued";
     this.flush(true);
     void this.prepareQueued();
@@ -231,22 +273,16 @@ export class UploadManager {
     const body = item.file.slice(start, end);
     try {
       await retry(async () => {
-        const response = await this.fetcher(`/_upload/${item.sessionId}/${index}`, {
-          method: "PUT",
-          body,
-          signal: item.controller.signal,
-        });
-        if (!response.ok) {
-          const error = new Error(await responseMessage(response)) as Error & { status?: number };
-          error.status = response.status;
-          throw error;
-        }
+        await this.uploadBlob(item, index, `/_upload/${item.sessionId}/${index}`, body);
       }, item);
       item.completedChunks.add(index);
+      item.inflightBytes.delete(index);
       item.uploaded = Math.min(item.size, item.uploaded + body.size);
+      this.sampleProgress(item);
       this.flush();
       if (item.completedChunks.size === item.chunkCount) await this.complete(item);
     } catch (error) {
+      item.inflightBytes.delete(index);
       if (item.controller.signal.aborted) item.status = "cancelled";
       else {
         item.status = "failed";
@@ -254,6 +290,72 @@ export class UploadManager {
       }
       this.flush(true);
     }
+  }
+
+  /**
+   * PUT a chunk over XMLHttpRequest so upload progress is observable.
+   * `fetch()` exposes no upload progress events, which left the UI stuck on
+   * "uploading" until the whole chunk finished.
+   */
+  private uploadBlob(item: InternalItem, index: number, url: string, body: Blob): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (item.controller.signal.aborted) {
+        reject(abortError());
+        return;
+      }
+      item.inflightBytes.set(index, 0);
+      const xhr = new XMLHttpRequest();
+      const onAbort = () => xhr.abort();
+      item.controller.signal.addEventListener("abort", onAbort, { once: true });
+      const stopListening = () => item.controller.signal.removeEventListener("abort", onAbort);
+
+      xhr.upload.addEventListener("progress", (event: ProgressEvent) => {
+        const loaded = Math.min(body.size, event.loaded);
+        item.inflightBytes.set(index, loaded);
+        this.sampleProgress(item);
+        this.flush();
+      });
+
+      xhr.addEventListener("load", () => {
+        stopListening();
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+        } else {
+          const error = new Error(`Upload failed (${xhr.status})`) as Error & { status?: number };
+          error.status = xhr.status;
+          reject(error);
+        }
+      });
+      xhr.addEventListener("error", () => {
+        stopListening();
+        reject(new Error("network error"));
+      });
+      xhr.addEventListener("abort", () => {
+        stopListening();
+        reject(abortError());
+      });
+
+      xhr.open("PUT", url, true);
+      xhr.send(body);
+    });
+  }
+
+  private inflightTotal(item: InternalItem): number {
+    let total = 0;
+    for (const bytes of item.inflightBytes.values()) total += bytes;
+    return total;
+  }
+
+  /** Displayed uploaded bytes: completed base + in-flight bytes, clamped monotonic. */
+  private displayedUploaded(item: InternalItem): number {
+    return Math.max(item.lastReported, Math.min(item.size, item.uploaded + this.inflightTotal(item)));
+  }
+
+  private sampleProgress(item: InternalItem): void {
+    const total = item.uploaded + this.inflightTotal(item);
+    item.lastReported = Math.max(item.lastReported, Math.min(item.size, total));
+    item.tracker.sample(total);
+    item.speed = item.tracker.speed();
   }
 
   private async complete(item: InternalItem): Promise<void> {
@@ -277,7 +379,18 @@ export class UploadManager {
     const notify = () => {
       this.frame = null;
       this.snapshot = {
-        items: [...this.items.values()].map(({ file: _file, controller: _controller, completedChunks: _chunks, ...item }) => ({ ...item })),
+        items: [...this.items.values()].map(item => {
+          const {
+            file: _file,
+            controller: _controller,
+            completedChunks: _chunks,
+            inflightBytes: _inflight,
+            lastReported: _lastReported,
+            tracker: _tracker,
+            ...rest
+          } = item;
+          return { ...rest, uploaded: this.displayedUploaded(item) };
+        }),
         active: this.active,
         parallel: this.parallel,
       };
@@ -318,4 +431,8 @@ async function responseMessage(response: Response): Promise<string> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Upload failed";
+}
+
+function abortError(): Error {
+  return new DOMException("Aborted", "AbortError");
 }

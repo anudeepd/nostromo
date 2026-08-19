@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 
 # Chunked upload defaults
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024  # 10 GB
-DEFAULT_MAX_CHUNK_SIZE = 100 * 1024 * 1024  # 100 MB per chunk
+DEFAULT_MAX_CHUNK_SIZE = 128 * 1024 * 1024  # 128 MB per chunk
 DEFAULT_MAX_CHUNKS = 10_000
 DEFAULT_SESSION_TTL_SECONDS = 3600  # 1 hour
-DEFAULT_CHUNK_READ_SIZE = 4 * 1024 * 1024  # 4 MB
+DEFAULT_CHUNK_READ_SIZE = 16 * 1024 * 1024  # 16 MB
 
 
 @dataclass

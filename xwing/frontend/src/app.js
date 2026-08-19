@@ -5,7 +5,7 @@ import { createAuthSession, isLoginResponseUrl } from "./shared.js";
 
 const DEFAULT_CHUNK_SIZE = 8 * 1024 * 1024;  // 8 MB
 const TARGET_UPLOAD_CHUNKS = 128;
-const MAX_BROWSER_CHUNK_SIZE = 32 * 1024 * 1024;  // 32 MB
+const MAX_BROWSER_CHUNK_SIZE = 64 * 1024 * 1024;  // 64 MB
 const UPLOAD_PROGRESS_CAP = 95;
 const UPLOAD_STALL_MS = 1500;
 const UPLOAD_RETRY_DELAYS_MS = [750, 1500, 3000];
@@ -505,9 +505,11 @@ function addUploadItem(name) {
   uploadList.appendChild(item);
   uploadList.scrollTop = uploadList.scrollHeight;
   return {
-    setProgress(pct) {
+    setProgress(pct, speed) {
       progressBar.style.width = pct + "%";
-      status.textContent = Math.round(pct) + "%";
+      status.textContent = speed
+        ? Math.round(pct) + "% (" + speed + ")"
+        : Math.round(pct) + "%";
     },
     setStatus(msg) {
       status.textContent = msg;
@@ -651,6 +653,44 @@ function putBlob(url, blob, callbacks = {}) {
   });
 }
 
+class SpeedTracker {
+  constructor() {
+    this.samples = [];
+    this.windowMs = 5000;
+    this.maxSamples = 20;
+  }
+  sample(bytes) {
+    const now = Date.now();
+    this.samples = this.samples.filter(sample => now - sample.t <= this.windowMs);
+    this.samples.push({ t: now, b: bytes });
+    if (this.samples.length > this.maxSamples) {
+      this.samples = this.samples.slice(this.samples.length - this.maxSamples);
+    }
+  }
+  speed() {
+    if (this.samples.length < 2) return 0;
+    const first = this.samples[0];
+    const last = this.samples[this.samples.length - 1];
+    const elapsed = (last.t - first.t) / 1000;
+    if (elapsed <= 0) return 0;
+    return (last.b - first.b) / elapsed;
+  }
+  reset() {
+    this.samples = [];
+  }
+}
+
+function formatSpeed(bytesPerSecond) {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytesPerSecond > 0 ? bytesPerSecond : 0;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return (unit ? value.toFixed(1) : Math.round(value)) + " " + units[unit] + "/s";
+}
+
 // ── Core: upload a single File to destDir on the server ───────────────────────
 async function uploadFile(file, destDir) {
   const label = destDir !== CURRENT_PATH
@@ -690,6 +730,7 @@ async function uploadFile(file, destDir) {
   const concurrency = getConcurrency();
   const chunkLoaded = new Array(totalChunks).fill(0);
   let loadedBytes = 0;
+  const speedTracker = new SpeedTracker();
 
   function noteChunkLoaded(i, loaded, chunkSize) {
     const nextLoaded = Math.max(chunkLoaded[i], Math.min(chunkSize, loaded));
@@ -698,7 +739,8 @@ async function uploadFile(file, destDir) {
     const pct = file.size === 0
       ? UPLOAD_PROGRESS_CAP
       : Math.min(UPLOAD_PROGRESS_CAP, (loadedBytes / file.size) * UPLOAD_PROGRESS_CAP);
-    ui.setProgress(pct);
+    speedTracker.sample(loadedBytes);
+    ui.setProgress(pct, formatSpeed(speedTracker.speed()));
   }
 
   async function uploadChunk(i) {
@@ -713,7 +755,6 @@ async function uploadFile(file, destDir) {
         onProgress(loaded) {
           ui.setProcessing(false);
           noteChunkLoaded(i, loaded, slice.size);
-          ui.setStatus("Uploading...");
         },
         onStalled() {
           ui.setProcessing(true);
