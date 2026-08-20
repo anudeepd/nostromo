@@ -286,6 +286,59 @@ main:focus-visible {
   50% { opacity: 1; transform: scale(1); }
 }
 
+/* ── Zip download spinner overlay ────────────────────────────────────────────── */
+.zip-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(8px);
+  animation: zip-overlay-in 150ms ease-out;
+}
+.zip-overlay[hidden] { display: none; }
+.zip-overlay.hiding { animation: zip-overlay-out 150ms ease-in forwards; }
+.zip-overlay-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(100%, 384px);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  padding: 20px;
+}
+.zip-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(124, 58, 237, 0.25);
+  border-top-color: #a78bfa;
+  border-radius: 999px;
+  animation: zip-spin 0.8s linear infinite;
+  flex: 0 0 auto;
+}
+.zip-overlay-text {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+@keyframes zip-overlay-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes zip-overlay-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(0.96); }
+}
+@keyframes zip-spin {
+  to { transform: rotate(360deg); }
+}
+
 .readonly-notice {
   margin-bottom: 12px;
   border: 1px solid rgba(251,191,36,0.45);

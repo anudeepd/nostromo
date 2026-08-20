@@ -2,6 +2,7 @@
 
 import { createDialogController, wireFileTableSelection } from "./app-core.js";
 import { createAuthSession, isLoginResponseUrl } from "./shared.js";
+import collectEntries, { appendPath, ensureDir as ensureDirWithFetch } from "./upload-entries.js";
 
 const DEFAULT_CHUNK_SIZE = 8 * 1024 * 1024;  // 8 MB
 const TARGET_UPLOAD_CHUNKS = 128;
@@ -75,10 +76,6 @@ function chunkSizeForFile(fileSize) {
   return Math.max(1, Math.min(chunkSize, MAX_BROWSER_CHUNK_SIZE, SERVER_MAX_CHUNK_BYTES));
 }
 
-function appendPath(base, name) {
-  return base + encodeURIComponent(name) + "/";
-}
-
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -89,6 +86,55 @@ function downloadBlob(blob, filename) {
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+// ── Zip download spinner overlay ───────────────────────────────────────────────
+function createZipOverlay() {
+  const overlay = document.createElement("div");
+  overlay.id = "zip-overlay";
+  overlay.className = "zip-overlay";
+  overlay.setAttribute("role", "status");
+  overlay.setAttribute("aria-live", "polite");
+  overlay.hidden = true;
+
+  const card = document.createElement("div");
+  card.className = "zip-overlay-card";
+
+  const spinner = document.createElement("span");
+  spinner.className = "zip-spinner";
+  spinner.setAttribute("aria-hidden", "true");
+
+  const text = document.createElement("span");
+  text.id = "zip-overlay-text";
+  text.className = "zip-overlay-text";
+
+  card.append(spinner, text);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  let hideTimer = null;
+  function setBusy(count) {
+    if (hideTimer) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+    if (count > 0) {
+      text.textContent = `Zipping ${count} file${count === 1 ? "" : "s"}…`;
+      overlay.classList.remove("hiding");
+      overlay.hidden = false;
+    } else {
+      overlay.classList.add("hiding");
+      hideTimer = setTimeout(() => {
+        overlay.hidden = true;
+        overlay.classList.remove("hiding");
+        hideTimer = null;
+      }, 150);
+    }
+  }
+
+  return { setBusy };
+}
+
+const zipOverlay = createZipOverlay();
 
 function filenameFromContentDisposition(header) {
   if (!header) return null;
@@ -357,13 +403,19 @@ async function showUndoDeleteToast(res, paths) {
   );
 }
 
-zipSelectedBtn.addEventListener("click", async () => {
-  if (!tableSelection?.selectedPaths.size) return;
-  const res = await authFetch("/_bulk/zip", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ base: CURRENT_PATH, paths: [...tableSelection.selectedPaths] }),
-  });
+async function downloadSelectedZip(paths = [...(tableSelection?.selectedPaths ?? [])]) {
+  if (!paths.length) return;
+  zipOverlay.setBusy(paths.length);
+  let res;
+  try {
+    res = await authFetch("/_bulk/zip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ base: CURRENT_PATH, paths }),
+    });
+  } finally {
+    zipOverlay.setBusy(0);
+  }
   if (!res.ok) {
     await dialogs.alert("Zip download failed", `Server returned ${res.status}.`);
     return;
@@ -371,7 +423,9 @@ zipSelectedBtn.addEventListener("click", async () => {
   const blob = await res.blob();
   const filename = filenameFromContentDisposition(res.headers.get("Content-Disposition")) || "xwing-selection.zip";
   downloadBlob(blob, filename);
-});
+}
+
+zipSelectedBtn.addEventListener("click", () => downloadSelectedZip());
 
 deleteSelectedBtn.addEventListener("click", async () => {
   if (!CAN_DELETE) {
@@ -532,13 +586,7 @@ function addUploadItem(name) {
 }
 
 // ── Directory helpers ─────────────────────────────────────────────────────────
-async function ensureDir(serverPath) {
-  const res = await authFetch(serverPath, { method: "MKCOL" });
-  if (!res.ok && res.status !== 405 && res.status !== 301) {
-    throw new Error(`MKCOL ${serverPath} failed: ${res.status}`);
-  }
-  return res.status !== 405 && res.status !== 301;
-}
+const ensureDir = (path) => ensureDirWithFetch(path, authFetch);
 
 async function prepareFolderRoot(name) {
   const finalRoot = appendPath(CURRENT_PATH, name);
@@ -813,41 +861,6 @@ async function uploadFile(file, destDir) {
   return true;
 }
 
-// ── Folder traversal via FileSystem API ───────────────────────────────────────
-async function collectEntries(dirEntry, serverBase) {
-  // Returns [{file, destDir}]
-  const results = [];
-  const reader = dirEntry.createReader();
-
-  async function readAll() {
-    return new Promise((resolve, reject) => {
-      let all = [];
-      function batch() {
-        reader.readEntries(entries => {
-          if (!entries.length) return resolve(all);
-          all = all.concat([...entries]);
-          batch();
-        }, reject);
-      }
-      batch();
-    });
-  }
-
-  const entries = await readAll();
-  for (const entry of entries) {
-    if (entry.isFile) {
-      const file = await new Promise((res, rej) => entry.file(res, rej));
-      results.push({ file, destDir: serverBase });
-    } else if (entry.isDirectory) {
-      const childBase = appendPath(serverBase, entry.name);
-      await ensureDir(childBase);
-      const sub = await collectEntries(entry, childBase);
-      results.push(...sub);
-    }
-  }
-  return results;
-}
-
 // ── Upload a list of {file, destDir} pairs — N files in parallel ──────────────
 async function uploadPairs(pairs, { reload = true } = {}) {
   let anySuccess = false;
@@ -928,7 +941,7 @@ async function uploadDataTransfer(dt) {
     if (entry && entry.isDirectory) {
       const root = await prepareFolderRoot(entry.name);
       if (!root) continue;
-      const sub = await collectEntries(entry, root.uploadRoot);
+      const sub = await collectEntries(entry, root.uploadRoot, ensureDir);
       pairs.push(...sub);
       pairs.push({ folderRoot: root });
     } else {
@@ -1015,3 +1028,5 @@ dropZone.addEventListener("drop", async e => {
   dropZone.classList.remove("dragging");
   await uploadDataTransfer(e.dataTransfer);
 });
+
+export { createZipOverlay, downloadSelectedZip };
