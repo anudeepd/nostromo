@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xwing"
-version = "0.3.43"
+version = "0.3.44"
 description = "File sharing server with WebDAV support"
 readme = "README.md"
 requires-python = ">=3.10"

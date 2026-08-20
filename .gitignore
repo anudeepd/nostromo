@@ -7,11 +7,7 @@ dist/
 build/
 
 # Frontend bundle build tooling (node_modules kept local, bundles committed)
-# Generated assets: edit source in xwing/frontend/src/, rebuild, do not commit output
-xwing/static/assets/*
-!xwing/static/assets/fonts/
-!xwing/static/assets/fonts/*.woff
-!xwing/static/assets/fonts/*.woff2
+# Generated assets: edit source in xwing/frontend/src/, rebuild, commit output
 node_modules/
 package-lock.json
 scripts/node_modules/
