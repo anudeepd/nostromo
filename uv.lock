@@ -215,7 +215,7 @@ wheels = [
 
 [[package]]
 name = "ldapgate"
-version = "0.1.25"
+version = "0.1.26"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -231,9 +231,9 @@ dependencies = [
     { name = "starlette" },
     { name = "uvicorn", extra = ["standard"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3a/b0/3961e1fceaa1da98f8d4dc06761bc323579747b4dfb8058dcec26f708929/ldapgate-0.1.25.tar.gz", hash = "sha256:23b8fa35e2d0c1694ccded92d6d594f677b70567a7e32bb9296fb0afa22db936", size = 157127, upload-time = "2026-08-09T08:57:43.167Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8a/22/e225bb89f11dacc6a28b6110b1d023e42ce27f1e5edf46a834f9cd785364/ldapgate-0.1.26.tar.gz", hash = "sha256:afe91aecd4edfbb96bd9b82a0c3a3d85243318a2f96c4c92c677315279003d27", size = 155856, upload-time = "2026-08-21T16:18:49.017Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a5/dc/0329fb0e1660a159cf83ba2da0455a0cb1f3c741a46d8253c8f8d56936e3/ldapgate-0.1.25-py3-none-any.whl", hash = "sha256:6c99e6d5b8ad20969994e0bcf1e1b8869949b85cd04363faa5780eaa4f0af776", size = 142367, upload-time = "2026-08-09T08:57:41.427Z" },
+    { url = "https://files.pythonhosted.org/packages/30/e6/429fef107680b47bf59598b653c8319d2c9fc8b0a7b337aa80e56d7b2742/ldapgate-0.1.26-py3-none-any.whl", hash = "sha256:1b056f074ce5ee70e91fa7dd32ac1b8c1960b1031c0ebdfdacf206ad7d2e5ab3", size = 142965, upload-time = "2026-08-21T16:18:47.345Z" },
 ]
 
 [[package]]
@@ -981,7 +981,7 @@ wheels = [
 
 [[package]]
 name = "xwing"
-version = "0.3.44"
+version = "0.3.45"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },

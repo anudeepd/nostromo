@@ -1474,19 +1474,25 @@ class TestAdminConsole:
         monkeypatch.setitem(sys.modules, "ldapgate", ldapgate_pkg)
         monkeypatch.setitem(sys.modules, "ldapgate.config", config_mod)
         monkeypatch.setitem(sys.modules, "ldapgate.middleware", middleware_mod)
-        return Settings(
-            root_dir=root,
-            tmp_dir=tmp_dir,
-            require_auth=True,
-            users_config=users,
-            ldap_config=ldap_yaml,
-            admin_users=["admin"],
-            trusted_auth_proxies=["testclient"],
-            audit_db=audit_db or (tmp_path / "audit.db"),
-        ), users, loaded_config
+        return (
+            Settings(
+                root_dir=root,
+                tmp_dir=tmp_dir,
+                require_auth=True,
+                users_config=users,
+                ldap_config=ldap_yaml,
+                admin_users=["admin"],
+                trusted_auth_proxies=["testclient"],
+                audit_db=audit_db or (tmp_path / "audit.db"),
+            ),
+            users,
+            loaded_config,
+        )
 
     def test_admin_page_and_user_management(self, root, tmp_dir, tmp_path, monkeypatch):
-        settings, users, loaded_config = self._settings(root, tmp_dir, tmp_path, monkeypatch)
+        settings, users, loaded_config = self._settings(
+            root, tmp_dir, tmp_path, monkeypatch
+        )
         admin_headers = {"X-Forwarded-User": "admin"}
         alice_headers = {"X-Forwarded-User": "alice"}
         with TestClient(create_app(settings)) as client:

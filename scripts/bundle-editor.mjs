@@ -8,8 +8,9 @@ import { build } from "esbuild";
 const entry = `
 import { EditorView, basicSetup } from "codemirror";
 import { EditorState } from "@codemirror/state";
-import { keymap } from "@codemirror/view";
-import { indentWithTab } from "@codemirror/commands";
+import { keymap as cmKeymap } from "@codemirror/view";
+import { closeSearchPanel as cmCloseSearchPanel, searchPanelOpen as cmSearchPanelOpen } from "@codemirror/search";
+import { indentWithTab as cmIndentWithTab } from "@codemirror/commands";
 import { oneDark } from "@codemirror/theme-one-dark";
 
 import { python }     from "@codemirror/lang-python";
@@ -28,7 +29,8 @@ import { dockerFile } from "@codemirror/legacy-modes/mode/dockerfile";
 import { nginx }      from "@codemirror/legacy-modes/mode/nginx";
 
 window.CM = {
-  EditorView, EditorState, basicSetup, keymap, indentWithTab, oneDark,
+  EditorView, EditorState, basicSetup, keymap: cmKeymap, indentWithTab: cmIndentWithTab, oneDark,
+  searchPanelOpen: cmSearchPanelOpen, closeSearchPanel: cmCloseSearchPanel,
   langs: {
     python, javascript, html, css, json, yaml, markdown, xml, sql,
     shell: () => StreamLanguage.define(shell),

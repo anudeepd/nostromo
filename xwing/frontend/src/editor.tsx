@@ -24,6 +24,8 @@ interface CodeMirrorApi {
   };
   EditorState: { create(options: unknown): unknown; readOnly: { of(value: boolean): unknown } };
   basicSetup: unknown; keymap: { of(value: unknown[]): unknown }; indentWithTab: unknown; oneDark: unknown;
+  searchPanelOpen(state: unknown): boolean;
+  closeSearchPanel(view: CodeMirrorView): boolean;
   langs: Record<string, (...args: unknown[]) => unknown>;
 }
 
@@ -38,6 +40,7 @@ function Logo(): React.JSX.Element {
 function EditorApp({ boot }: { boot: EditorBootstrap }): React.JSX.Element {
   const mount = useRef<HTMLDivElement>(null);
   const view = useRef<CodeMirrorView | null>(null);
+  const closingRef = useRef(false);
   const logoutForm = useRef<HTMLFormElement>(null);
   const saved = useRef(boot.content);
   const allowLeave = useRef(false);
@@ -70,13 +73,55 @@ function EditorApp({ boot }: { boot: EditorBootstrap }): React.JSX.Element {
     const beforeUnload = (event: BeforeUnloadEvent) => { if (dirty && !allowLeave.current) event.preventDefault(); };
     const shortcut = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void save(); }
-      if (event.key === "Escape" && !event.defaultPrevented) {
+      if (event.key === "Escape" && !event.defaultPrevented && !window.CM.searchPanelOpen(view.current?.state)) {
         if (!confirmLeave) { event.preventDefault(); requestLeave(boot.directory); }
       }
     };
+    const onKeydownCapture = (event: KeyboardEvent) => {
+      const cm = window.CM;
+      const editor = view.current;
+      if (!editor) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f" && cm.searchPanelOpen(editor.state)) {
+        const field = mount.current?.querySelector<HTMLInputElement>(".cm-panel.cm-search [main-field]");
+        if (field) { event.preventDefault(); event.stopPropagation(); field.focus(); field.select(); }
+        return;
+      }
+      if (event.key === "Escape" && closeSearchPanelAnimated()) { event.preventDefault(); event.stopPropagation(); }
+    };
+    const onCloseClickCapture = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (!target?.closest?.(".cm-panel.cm-search [name=close]")) return;
+      if (closeSearchPanelAnimated()) { event.preventDefault(); event.stopPropagation(); }
+    };
     window.addEventListener("beforeunload", beforeUnload); document.addEventListener("keydown", shortcut);
-    return () => { window.removeEventListener("beforeunload", beforeUnload); document.removeEventListener("keydown", shortcut); };
+    document.addEventListener("keydown", onKeydownCapture, true);
+    document.addEventListener("click", onCloseClickCapture, true);
+    return () => {
+      window.removeEventListener("beforeunload", beforeUnload);
+      document.removeEventListener("keydown", shortcut);
+      document.removeEventListener("keydown", onKeydownCapture, true);
+      document.removeEventListener("click", onCloseClickCapture, true);
+    };
   }, [dirty, confirmLeave]);
+
+  function closeSearchPanelAnimated(): boolean {
+    const cm = window.CM;
+    const editor = view.current;
+    if (!editor || closingRef.current || !cm.searchPanelOpen(editor.state)) return false;
+    closingRef.current = true;
+    const panel = mount.current?.querySelector(".cm-panel.cm-search");
+    if (panel && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      panel.classList.add("closing");
+      window.setTimeout(() => {
+        cm.closeSearchPanel(editor);
+        closingRef.current = false;
+      }, 160);
+    } else {
+      cm.closeSearchPanel(editor);
+      closingRef.current = false;
+    }
+    return true;
+  }
 
   useEffect(() => {
     if (!boot.authIdleTimeout) return;
