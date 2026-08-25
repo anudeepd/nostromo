@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/static/assets/style.css"/>
 </head>
 <body data-file-path="{{ file_url_path }}" data-file-ext="{{ ext }}" data-can-write="{{ 'true' if perms.write else 'false' }}" data-auth-idle-timeout="{{ auth_idle_timeout }}" data-csp-style-nonce="{{ csp_style_nonce or '' }}">
-  <div id="xwing-editor-root"><div class="boot-loading" role="status">Opening editor…</div></div>
+  <div id="xwing-editor-root"></div>
   <script type="application/json" id="xwing-editor-bootstrap">{{ editor_bootstrap | tojson }}</script>
   <script src="/static/codemirror-bundle.js"></script>
   <script src="/static/assets/editor.js" defer></script>

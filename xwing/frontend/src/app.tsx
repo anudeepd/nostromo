@@ -35,6 +35,27 @@ function sortStorageKey(user: string): string {
   return `xwing.sort.${SORT_STORAGE_VERSION}.${user}`;
 }
 
+function TransitionVeil({ active, label }: { active: boolean; label: string }): React.JSX.Element | null {
+  const [visible, setVisible] = useState(active);
+  const [closing, setClosing] = useState(false);
+
+  useEffect(() => {
+    if (active) {
+      setVisible(true);
+      setClosing(false);
+    } else if (visible) {
+      setClosing(true);
+      const timer = window.setTimeout(() => { setVisible(false); setClosing(false); }, prefersReducedMotion() ? 0 : 140);
+      return () => window.clearTimeout(timer);
+    }
+  }, [active]);
+
+  if (!visible) return null;
+  return <div className={`transition-veil ${closing ? "closing" : ""}`} role="status" aria-label={label}>
+    <div className="transition-veil-pill"><span className="transition-veil-spinner" aria-hidden="true"/><span>{label}</span></div>
+  </div>;
+}
+
 function Logo(): React.JSX.Element {
   return <svg className="brand-mark" viewBox="0 0 200 200" aria-label="X-wing logo">
     <rect x="6" y="6" width="188" height="188" rx="36" />
@@ -389,11 +410,14 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
     uploadManager.add(Array.from(list), directory.path, directory.upload.chunkSize);
   };
 
+  const transitioning = directoryState === "loading" || pageLeaving;
+
   return <div className={`xw-app ${pageLeaving ? "page-leaving" : ""}`}
     onDragEnter={event => { event.preventDefault(); if (!directory.permissions.write) return; dragDepth.current += 1; refreshDropFeedback(); }}
     onDragOver={event => { if (!directory.permissions.write) return; event.preventDefault(); refreshDropFeedback(); }}
     onDragLeave={event => { event.preventDefault(); dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) clearDropFeedback(); }}
     onDrop={event => { event.preventDefault(); clearDropFeedback(); queueFiles(event.dataTransfer.files); }}>
+    <TransitionVeil active={transitioning} label="Switching" />
     <a className="skip-link" href="#file-list">Skip to files</a>
     <header className="topbar">
       <div className="brand"><Logo/><span>X-wing</span><small className="brand-context">FILES</small></div>
@@ -403,12 +427,12 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
         </button>
         {accountOpen && <div className="popover account-menu" role="menu" aria-label="Workspace navigation">
           <a className="menu-item active" href="/" role="menuitem" aria-current="page"><span className="workspace-nav-dot" aria-hidden="true"/>Files</a>
-          <a className="menu-item" href="/admin" role="menuitem"><span className="workspace-nav-dot" aria-hidden="true"/>Admin panel</a>
+          <a className="menu-item" href="/admin" role="menuitem" onClick={() => setPageLeaving(true)}><span className="workspace-nav-dot" aria-hidden="true"/>Admin panel</a>
         </div>}
       </div> : <span>{directory.user.name}</span>}<form id="logout-form" method="post" action="/_auth/logout" onSubmit={event => { event.preventDefault(); setAuthOverlay("signout"); const form = event.currentTarget; window.setTimeout(() => form.submit(), AUTH_REDIRECT_DELAY_MS); }}><button className="signout-button" type="submit">Sign out</button></form></div> : <span className="anonymous-label">anonymous</span>}
     </header>
 
-    <main className={`workspace ${dragging ? "dragging" : ""} ${directoryState === "loading" ? "directory-loading" : ""}`}>
+    <main className={`workspace ${dragging ? "dragging" : ""}`}>
       <section className="location" aria-label="Current location">
         <nav className="crumbs" aria-label="Breadcrumb">{directory.breadcrumbs.map((crumb, index) => <React.Fragment key={crumb.path}>
           {index > 0 && <span className="slash">/</span>}
@@ -462,7 +486,6 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
           {files.map((file, index) => <FileRow key={file.path} file={file} selected={selected.has(file.path)} loading={directoryState === "loading"} arriving={arrivingNames.has(file.name)} onSelect={(gesture) => toggleSelection(file, index, gesture)} onOpen={() => file.kind === "directory" ? void navigate(file.path) : openDocument(`${file.path}${file.editable ? "?edit" : ""}`)} onDelete={() => setDialog({ kind: "delete", paths: [file.path], pending: false })} onDeleteKey={() => { if (directory.permissions.delete) setDialog({ kind: "delete", paths: selected.size ? [...selected] : [file.path], pending: false }); }} onClear={() => { setSelected(new Set()); setLastSelected(null); }}/>) }
         </div>
         <div className="statusbar"><span className="drop-hint">Drop files anywhere to upload</span></div>
-        {directoryState === "loading" && <div className="loading-line"/>}
         {dropWaitState && <div className={`drop-wait ${dropWaitState}`}>
           {dropWaitState === "preparing"
             ? <span className="drop-wait-spinner" aria-hidden="true"/>
