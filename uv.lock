@@ -981,7 +981,7 @@ wheels = [
 
 [[package]]
 name = "xwing"
-version = "0.3.45"
+version = "0.3.46"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },

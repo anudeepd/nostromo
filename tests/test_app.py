@@ -380,6 +380,9 @@ class TestAuth:
         source = (Path(__file__).parents[1] / "xwing/frontend/src/app.tsx").read_text()
         assert "Read-only access. Uploads and folder creation are disabled." in source
         assert "disabled={!directory.permissions.write}" in source
+        style = (Path(__file__).parents[1] / "xwing/frontend/src/style.css").read_text()
+        assert 'className="workspace-controls"' in source
+        assert ".workspace-controls" in style
 
     def test_listing_has_bulk_selection_controls(self, client, root):
         (root / "hello.txt").write_text("hi")
@@ -1503,6 +1506,12 @@ class TestAdminConsole:
             assert bootstrap(directory)["admin"] is True
             assert "admin-bootstrap" in page.text
             assert "/static/assets/admin.js" in page.text
+            admin_css = client.get("/static/assets/admin.css")
+            assert admin_css.status_code == 200
+            assert admin_css.headers["content-type"].startswith("text/css")
+            admin_js = client.get("/static/assets/admin.js")
+            assert admin_js.status_code == 200
+            assert admin_js.headers["content-type"].startswith("text/javascript")
 
             listed = client.get("/api/admin/users", headers=admin_headers)
             assert listed.status_code == 200

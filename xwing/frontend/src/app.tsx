@@ -417,6 +417,7 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
         <div className="location-meta"><span>{directory.files.length} items</span></div>
       </section>
 
+      <div className="workspace-controls">
       {!directory.permissions.write && <div className="readonly-notice" role="status">Read-only access. Uploads and folder creation are disabled.</div>}
       <section className="actionbar" aria-label="File actions">
         <div className="toolbar-group">
@@ -447,6 +448,7 @@ function App({ initial }: { initial: XwingBootstrapV1 }): React.JSX.Element {
           </div>
         </div>
       </section>
+      </div>
 
       <section className="file-surface" aria-label="Files and folders" aria-busy={directoryState === "loading"} onKeyDown={event => {
         if ((event.target as Element).closest(".file-row")) return;
