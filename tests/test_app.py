@@ -1577,6 +1577,16 @@ class TestAdminConsole:
                 "allowed_users"
             ] == ["admin"]
 
+    def test_loading_states_render_spinners(self):
+        style = (Path(__file__).parents[1] / "xwing/frontend/src/style.css").read_text()
+        admin_style = (
+            Path(__file__).parents[1] / "xwing/frontend/src/admin.css"
+        ).read_text()
+        assert ".boot-loading::before" in style
+        assert "animation:xw-spin" in style
+        assert ".loading-card::before" in admin_style
+        assert "animation: xw-spin" in admin_style
+
     def test_admin_requires_ldapgate_and_external_allowlist(
         self, root, tmp_dir, users_yaml, tmp_path
     ):

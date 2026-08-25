@@ -32,6 +32,7 @@
 .admin-tab:hover { color: var(--admin-text); background: rgba(167, 139, 250, .08); }
 .admin-tab.active { border-color: var(--admin-accent); color: var(--admin-accent-hi); }
 .admin-view { min-height: 300px; animation: xw-surface-in var(--xw-surface) var(--xw-ease) both; }
+.admin-view:has(.loading-card) { display: grid; place-items: center; }
 .admin-view.no-motion { animation: none; }
 .metric-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
 .metric-card, .admin-card { border: 1px solid var(--admin-line); border-radius: var(--admin-radius); background: linear-gradient(145deg, rgba(20, 27, 42, .98), rgba(14, 19, 30, .98)); box-shadow: 0 16px 44px rgba(0, 0, 0, .16); }
@@ -143,7 +144,8 @@ td strong { color: var(--admin-text); font-weight: 500; }
 .trash-path code { min-width: 0; color: var(--admin-text); font: inherit; overflow-wrap: anywhere; white-space: normal; }
 .trash-kind { color: var(--admin-faint); font: 500 10px "IBM Plex Mono", monospace; text-transform: uppercase; }
 .empty-state { max-width: 620px; }
-.loading-card { color: var(--admin-muted); }
+.loading-card { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 26px 34px; border: 1px solid var(--admin-line); border-radius: var(--admin-radius); background: rgba(17, 23, 34, 0.6); box-shadow: none; color: var(--admin-muted); font-size: 13px; }
+.loading-card::before { content: ""; width: 18px; height: 18px; flex: 0 0 auto; border: 2px solid var(--admin-line-hi); border-top-color: var(--admin-accent-hi); border-radius: 50%; animation: xw-spin .8s linear infinite; }
 .admin-fatal { min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; color: var(--admin-muted); text-align: center; }
 .admin-fatal strong { color: var(--admin-text); font-size: 20px; }
 .admin-fatal .button { margin-top: 8px; }
@@ -176,4 +178,5 @@ td strong { color: var(--admin-text); font-weight: 500; }
 
 @media (prefers-reduced-motion: reduce) {
   .button { transition: none; }
+  .loading-card::before { animation-duration: .01ms !important; }
 }
