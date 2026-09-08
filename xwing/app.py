@@ -26,6 +26,8 @@ from .auth import get_user, require_perm
 from . import audit_store, trash_store
 from .config import Settings, UserConfig
 from .files import (
+    EDITOR_FULL_EDIT_MAX,
+    EDITOR_PREVIEW_BYTES,
     human_size,
     is_editable,
     is_ignored_system_file,
@@ -830,7 +832,21 @@ def create_app(settings: Settings) -> FastAPI:
     async def _handle_edit(fspath: Path, request: Request, user: str) -> Response:
         rel_path = _to_rel_path(fspath)
         url_path = _to_url_path(fspath)
-        content = await anyio.Path(fspath).read_text(encoding="utf-8", errors="replace")
+        total_size = (await anyio.Path(fspath).stat()).st_size
+        if total_size <= EDITOR_FULL_EDIT_MAX:
+            content = await anyio.Path(fspath).read_text(
+                encoding="utf-8", errors="replace"
+            )
+            truncated = False
+            preview_bytes = total_size
+        else:
+            # Never load a huge file fully into memory or the page:
+            # preview the head as read-only instead.
+            async with await anyio.open_file(fspath, "rb") as f:
+                head = await f.read(EDITOR_PREVIEW_BYTES)
+            content = head.decode("utf-8", errors="replace")
+            truncated = True
+            preview_bytes = len(head)
         dir_path = rel_path.rsplit("/", 1)[0] + "/"
         if dir_path == "//":
             dir_path = "/"
@@ -843,8 +859,12 @@ def create_app(settings: Settings) -> FastAPI:
             "displayPath": rel_path,
             "extension": fspath.suffix.lstrip(".").lower(),
             "content": content,
+            "truncated": truncated,
+            "totalSize": total_size,
+            "previewBytes": preview_bytes,
             "user": {"name": user, "authenticated": user != "anonymous"},
             "canWrite": perms.write,
+            "maxChunkBytes": settings.max_chunk_bytes,
             "cspNonce": request.state.csp_style_nonce or "",
             "authIdleTimeout": ldap_idle_timeout,
         }

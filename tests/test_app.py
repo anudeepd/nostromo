@@ -227,6 +227,91 @@ class TestFileDownload:
         assert r.status_code == 404
 
 
+class TestEditorTruncation:
+    def test_small_file_opens_fully(self, client, root):
+        (root / "notes.txt").write_text("hello")
+        r = client.get("/notes.txt?edit")
+        assert r.status_code == 200
+        data = editor_bootstrap(r)
+        assert data["truncated"] is False
+        assert data["content"] == "hello"
+        assert data["totalSize"] == 5
+        assert data["previewBytes"] == 5
+
+    def test_file_at_full_edit_limit_is_not_truncated(
+        self, client, root, monkeypatch
+    ):
+        import xwing.app as app_module
+
+        monkeypatch.setattr(app_module, "EDITOR_FULL_EDIT_MAX", 100)
+        (root / "exact.txt").write_bytes(b"a" * 100)
+        r = client.get("/exact.txt?edit")
+        assert r.status_code == 200
+        data = editor_bootstrap(r)
+        assert data["truncated"] is False
+        assert data["content"] == "a" * 100
+
+    def test_large_file_opens_as_truncated_preview(
+        self, client, root, monkeypatch
+    ):
+        import xwing.app as app_module
+
+        monkeypatch.setattr(app_module, "EDITOR_FULL_EDIT_MAX", 100)
+        monkeypatch.setattr(app_module, "EDITOR_PREVIEW_BYTES", 10)
+        (root / "big.txt").write_bytes(b"a" * 500)
+        r = client.get("/big.txt?edit")
+        assert r.status_code == 200
+        data = editor_bootstrap(r)
+        assert data["truncated"] is True
+        assert data["content"] == "a" * 10
+        assert data["totalSize"] == 500
+        assert data["previewBytes"] == 10
+
+    def test_truncated_preview_is_marked_read_only_in_frontend(self):
+        base = Path(__file__).parents[1] / "xwing"
+        source = (base / "frontend" / "src" / "editor.tsx").read_text()
+        bundle = (base / "static" / "assets" / "editor.js").read_text()
+        assert "boot.truncated" in source
+        assert "File too large to edit" in source
+        assert "File too large to edit" in bundle
+
+    def test_editor_bootstrap_exposes_max_chunk_bytes(self, client, root):
+        from xwing.config import DEFAULT_MAX_CHUNK_SIZE
+
+        (root / "notes.txt").write_text("hello")
+        r = client.get("/notes.txt?edit")
+        assert r.status_code == 200
+        assert editor_bootstrap(r)["maxChunkBytes"] == DEFAULT_MAX_CHUNK_SIZE
+
+    def test_large_save_uses_resumable_session_api(self, client, root):
+        # Mirror of the frontend's chunked save path: init → chunk PUTs →
+        # complete must atomically replace the edited file with the same
+        # semantics (and audit shape) as a direct PUT.
+        (root / "doc.txt").write_text("old")
+        new_content = b"n" * (2 * 1024 * 1024 + 7)
+        r = client.post(
+            "/_upload/init",
+            json={"filename": "doc.txt", "total_chunks": 3, "dir": "/"},
+        )
+        assert r.status_code == 200
+        session_id = r.json()["session_id"]
+        chunks = [new_content[: 1024 * 1024], new_content[1024 * 1024 : 2 * 1024 * 1024], new_content[2 * 1024 * 1024 :]]
+        for index, chunk in enumerate(chunks):
+            r = client.put(f"/_upload/{session_id}/{index}", content=chunk)
+            assert r.status_code == 204
+        r = client.post(f"/_upload/{session_id}/complete")
+        assert r.status_code == 200
+        assert (root / "doc.txt").read_bytes() == new_content
+
+    def test_chunked_save_frontend_uses_session_api(self):
+        base = Path(__file__).parents[1] / "xwing"
+        source = (base / "frontend" / "src" / "editor.tsx").read_text()
+        bundle = (base / "static" / "assets" / "editor.js").read_text()
+        for needle in ("/_upload/init", "/complete", "Saving"):
+            assert needle in source
+            assert needle in bundle
+
+
 class TestAuth:
     def test_require_auth_blocks_anonymous(self, root, tmp_dir):
         s = Settings(root_dir=root, tmp_dir=tmp_dir, require_auth=True)

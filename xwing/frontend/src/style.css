@@ -914,6 +914,19 @@ tr:focus-within .btn-zip { opacity: 1; }
 .editor-readonly {
   margin: 10px 20px 0;
 }
+.editor-notices {
+  position: absolute;
+  top: 62px;
+  right: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+.editor-notices .readonly-notice {
+  margin: 0;
+}
 .save-status {
   font-size: 0.75rem;
   color: var(--text-muted);

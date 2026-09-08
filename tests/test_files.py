@@ -95,17 +95,17 @@ class TestIsEditable:
         f.write_bytes(b"\x89PNG\r\n")
         assert not is_editable(f)
 
-    def test_oversized_text_file_not_editable(self, tmp_path):
+    def test_large_text_file_is_editable(self, tmp_path):
         f = tmp_path / "big.txt"
         f.write_bytes(b"x" * (2 * 1024 * 1024 + 1))
-        assert not is_editable(f)
+        assert is_editable(f)
 
     def test_extensionless_small_file_editable(self, tmp_path):
         f = tmp_path / "Makefile"
         f.write_text("all:\n\techo hi")
         assert is_editable(f)
 
-    def test_extensionless_oversized_file_not_editable(self, tmp_path):
+    def test_extensionless_large_file_is_editable(self, tmp_path):
         f = tmp_path / "Makefile"
         f.write_bytes(b"x" * (2 * 1024 * 1024 + 1))
-        assert not is_editable(f)
+        assert is_editable(f)

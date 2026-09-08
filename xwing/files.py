@@ -73,8 +73,7 @@ def list_dir(path: Path) -> list[dict]:
                         "size": stat.st_size,
                         "size_human": "" if is_dir else human_size(stat.st_size),
                         "mtime": stat.st_mtime,
-                        "editable": (not is_dir)
-                        and is_editable(child_path, size=stat.st_size),
+                        "editable": (not is_dir) and is_editable(child_path),
                     }
                 )
             except PermissionError:
@@ -130,14 +129,18 @@ _EDITABLE_EXTS = {
     ".editorconfig",
     ".log",
 }
-_EDITABLE_MAX = 2 * 1024 * 1024  # 2 MB
 
 
-def is_editable(path: Path, *, size: int | None = None) -> bool:
+# Files at or under this size open fully editable in the browser editor.
+# Larger files open as a read-only preview of the first EDITOR_PREVIEW_BYTES
+# so a huge file can't OOM the server worker or freeze the browser tab.
+EDITOR_FULL_EDIT_MAX = 32 * 1024 * 1024  # 32 MB
+EDITOR_PREVIEW_BYTES = 1024 * 1024  # 1 MB
+
+
+def is_editable(path: Path) -> bool:
     """True if the file should be opened in the browser editor."""
     if path.name == ".env" or path.name.startswith(".env."):
-        return False
-    if (path.stat().st_size if size is None else size) > _EDITABLE_MAX:
         return False
     if path.suffix.lower() in _EDITABLE_EXTS:
         return True
